@@ -1,0 +1,15 @@
+{
+  "id": "example-embed-app",
+  "name": "Example DApp",
+  "shortDescription": "Demo embedded application",
+  "description": "A demo embedded application showcasing the AW SDK capabilities for wallet integration.",
+  "icon": "/icon.svg",
+  "category": "utilities",
+  "requiredScopes": [
+    "user.profile.read",
+    "accounts.read",
+    "accounts.balances.read",
+    "transfers.create",
+    "payments.create"
+  ]
+}
