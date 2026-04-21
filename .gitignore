@@ -1,9 +1,0 @@
-node_modules
-dist
-*.local
-.angular
-out-tsc
-.idea
-.vscode
-.env
-.gitignore
