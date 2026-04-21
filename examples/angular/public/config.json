@@ -1,0 +1,14 @@
+{
+  "id": "dev",
+  "name": "Example DApp (Angular)",
+  "shortDescription": "Angular demo embedded application",
+  "description": "An Angular demo embedded application showcasing the AW SDK capabilities for wallet integration.",
+  "icon": "./icon.svg",
+  "category": "utilities",
+  "requiredScopes": [
+    "userData",
+    "balance",
+    "pay",
+    "receive"
+  ]
+}
