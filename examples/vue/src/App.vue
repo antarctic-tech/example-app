@@ -7,21 +7,16 @@
  * When embedded: the wallet loads this app inside an iframe and passes its
  * origin via the ?parentOrigin=... query parameter.
  */
-import { ref, shallowRef, onMounted, onUnmounted, nextTick, computed } from 'vue';
+import { ref, shallowRef, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import {
   AWSDK,
-  AWCommand,
   AWInitError,
   AWOperationError,
   AWScopeError,
   AWSessionError,
   AWTimeoutError,
 } from '@antarctic-wallet/aw-sdk';
-import type {
-  AWOperationType,
-  AWSession,
-  AWUserContext,
-} from '@antarctic-wallet/aw-sdk';
+import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +25,33 @@ interface AppConfig {
   id: string;
   name: string;
   requiredScopes: string[];
+}
+
+/** localStorage key for the user-supplied appId override */
+const APP_ID_STORAGE_KEY = 'aw-demo:appId';
+
+/**
+ * Resolves the appId at startup. Priority:
+ *   1. ?appId=... query parameter (one-shot override, also persisted)
+ *   2. localStorage (previously entered by the user)
+ *   3. null — UI will prompt the user to enter one
+ */
+function resolveStoredAppId(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get('appId');
+  if (fromQuery) {
+    try {
+      localStorage.setItem(APP_ID_STORAGE_KEY, fromQuery);
+    } catch {
+      //
+    }
+    return fromQuery;
+  }
+  try {
+    return localStorage.getItem(APP_ID_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 /** Single Event Log entry — renders in the log panel in real time */
@@ -81,16 +103,111 @@ function handleSdkError(error: unknown): string {
   return String(error);
 }
 
-/** SDK commands used to probe version support via sdk.isCommandAvailable() */
-const KNOWN_COMMANDS: { name: string; cmd: AWCommand }[] = [
-  { name: 'Init', cmd: AWCommand.Init },
-  { name: 'SessionRefresh', cmd: AWCommand.SessionRefresh },
-  { name: 'PrepareOperation', cmd: AWCommand.PrepareOperation },
-  { name: 'RequestConfirm', cmd: AWCommand.RequestConfirm },
-  { name: 'GetSessionStatus', cmd: AWCommand.GetSessionStatus },
-  { name: 'GetScopes', cmd: AWCommand.GetScopes },
-  { name: 'GetScopesData', cmd: AWCommand.GetScopesData },
-];
+// ── Backend (B2B) intent demo helpers ─────────────────────────────────────
+//
+// IMPORTANT: real DApps MUST sign and POST these requests from THEIR server.
+// API key/secret here is exposed in the browser ONLY because this is a demo
+// to show wallet integrators what payload and signature the backend expects.
+// Do NOT replicate this pattern in production — leaking api_secret in the
+// browser allows anyone to impersonate the app.
+
+interface BackendIntentConfig {
+  apiBase: string;
+  apiKey: string;
+  apiSecret: string;
+  bearerToken: string;
+  telegramUserId: string;
+}
+
+/** Pending intent shape returned by GET /api/v2/sdk/operations/intents */
+interface PendingIntent {
+  operationId: string;
+  type: string;
+  status: string;
+  data?: { amount?: string; scopes?: string[] } & Record<string, unknown>;
+  approvedAt?: string | null;
+}
+
+const BACKEND_CONFIG_STORAGE_KEY = 'aw-demo:backendIntent:v2';
+const LEGACY_BACKEND_CONFIG_STORAGE_KEY = 'aw-demo:backendIntent';
+
+function loadBackendConfig(): BackendIntentConfig {
+  try {
+    localStorage.removeItem(LEGACY_BACKEND_CONFIG_STORAGE_KEY);
+  } catch {
+    //
+  }
+  try {
+    const raw = localStorage.getItem(BACKEND_CONFIG_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<BackendIntentConfig>;
+      return {
+        apiBase: parsed.apiBase ?? '',
+        apiKey: parsed.apiKey ?? '',
+        apiSecret: parsed.apiSecret ?? '',
+        bearerToken: parsed.bearerToken ?? '',
+        telegramUserId: parsed.telegramUserId ?? '',
+      };
+    }
+  } catch {
+    //
+  }
+  return { apiBase: '', apiKey: '', apiSecret: '', bearerToken: '', telegramUserId: '' };
+}
+
+function saveBackendConfig(cfg: BackendIntentConfig): void {
+  try {
+    localStorage.setItem(BACKEND_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    //
+  }
+}
+
+interface BackendIntentResponse {
+  data?: { operationId?: string; operation_id?: string };
+  operationId?: string;
+  operation_id?: string;
+}
+
+interface IntentRelayPayload {
+  apiBase: string;
+  apiKey: string;
+  apiSecret: string;
+  type: 'pay' | 'receive';
+  telegramUserId: number;
+  amount: string;
+}
+
+/**
+ * Posts the intent payload to OUR backend (`/api/intents`). The backend signs
+ * the HMAC and forwards to AW. The browser never has to compute the HMAC, but
+ * for this demo we still ship `apiSecret` in the body — clearly NOT how a
+ * real integration should work.
+ */
+async function createBackendIntent(
+  payload: IntentRelayPayload,
+): Promise<{ operationId: string; status: number; rawResponse: string }> {
+  const response = await fetch('/api/intents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${text}`);
+  let parsed: BackendIntentResponse = {};
+  try {
+    parsed = JSON.parse(text) as BackendIntentResponse;
+  } catch {
+    //
+  }
+  const operationId =
+    parsed.data?.operationId ??
+    parsed.data?.operation_id ??
+    parsed.operationId ??
+    parsed.operation_id;
+  if (!operationId) throw new Error(`No operationId in response: ${text}`);
+  return { operationId, status: response.status, rawResponse: text };
+}
 
 // ── State ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +219,12 @@ const insideWallet = ref(false);
 const logs = ref<LogEntry[]>([]);
 const busy = ref<string | null>(null);
 const logContainer = ref<HTMLElement | null>(null);
+const appId = ref<string | null>(resolveStoredAppId());
+const appIdInput = ref('');
+const backendCfg = ref<BackendIntentConfig>(loadBackendConfig());
+const intentType = ref<'pay' | 'receive'>('pay');
+const intentAmount = ref('5.00');
+const pendingIntents = ref<PendingIntent[]>([]);
 
 const sdk = shallowRef<AWSDK | null>(null);
 const disabled = computed(() => !session.value);
@@ -123,7 +246,7 @@ function addLog(message: string, type: LogEntry['type'] = 'info') {
  *   4. Subscribe to every SDK event (ready/error/scopes/session/operation)
  *   5. sdk.init() — handshake with the host over postMessage
  */
-onMounted(async () => {
+async function bootstrap(currentAppId: string) {
   insideWallet.value = AWSDK.isInsideWallet();
   addLog(`isInsideWallet: ${insideWallet.value}`);
 
@@ -131,7 +254,7 @@ onMounted(async () => {
   config.value = cfg;
 
   const instance = new AWSDK({
-    appId: cfg.id,
+    appId: currentAppId,
     scopes: [...cfg.requiredScopes],
     parentOrigin: getParentOrigin(),
     debug: true,
@@ -187,71 +310,78 @@ onMounted(async () => {
     addLog(`Init failed: ${handleSdkError(error)}`, 'error');
     status.value = 'error';
   }
+}
+
+onMounted(() => {
+  insideWallet.value = AWSDK.isInsideWallet();
+  if (!appId.value) {
+    addLog('Waiting for appId...', 'warn');
+    return;
+  }
+  bootstrap(appId.value);
 });
+
+let intentsPollId: number | null = null;
 
 onUnmounted(() => {
   sdk.value?.destroy();
   sdk.value = null;
+  if (intentsPollId !== null) {
+    window.clearInterval(intentsPollId);
+    intentsPollId = null;
+  }
 });
 
-// ── Actions ───────────────────────────────────────────────────────────────
-
 /**
- * Shared runner for every user-facing operation.
- * Flow: prepare() creates an intent → requestConfirmation() asks the user
- * to approve it in the wallet UI → the awaited result contains status/txId.
+ * Auto-refresh the pending intents list every 5 seconds whenever the user
+ * has filled in both the API base URL and the bearer token.
  */
-async function runOperation(key: string, label: string, params: Parameters<AWSDK['operations']['prepare']>[0]) {
-  if (!sdk.value) return;
-  busy.value = key;
-  addLog(`Preparing ${label} intent...`);
+watch(
+  () => [backendCfg.value.apiBase, backendCfg.value.bearerToken] as const,
+  ([apiBase, bearer]) => {
+    if (intentsPollId !== null) {
+      window.clearInterval(intentsPollId);
+      intentsPollId = null;
+    }
+    if (!apiBase || !bearer) return;
+    fetchPendingIntents();
+    intentsPollId = window.setInterval(fetchPendingIntents, 5000);
+  },
+  { immediate: true, deep: true },
+);
+
+/** Persist user-supplied appId and trigger SDK bootstrap */
+function submitAppId() {
+  const trimmed = appIdInput.value.trim();
+  if (!trimmed) return;
   try {
-    const intent = await sdk.value.operations.prepare(params);
-    addLog(`${label} intent prepared: ${intent.operationId} (${intent.status})`);
-    addLog('Requesting user confirmation...');
-    const result = await sdk.value.operations.requestConfirmation(intent.operationId);
-    addLog(
-      `${label} result: ${result.status}${result.txId ? `, txId: ${result.txId}` : ''}`,
-      'success',
-    );
-  } catch (error) {
-    addLog(`${label} failed: ${handleSdkError(error)}`, 'error');
-  } finally {
-    busy.value = null;
+    localStorage.setItem(APP_ID_STORAGE_KEY, trimmed);
+  } catch {
+    //
   }
+  appId.value = trimmed;
+  bootstrap(trimmed);
 }
 
-/** Pay 5 USDT — prepares a payment intent and asks the user to confirm */
-const pay = () =>
-  runOperation('pay', 'Pay', {
-    type: 'pay' as AWOperationType,
-    amount: '5.00',
-    currency: 'USDT',
-    to: 'TRTNGawnjNjqaWrMUFCHfBJFuaxaXx1Ntk',
-    description: 'Test payment from Example DApp',
-    metadata: { orderId: 'demo-001' },
-  });
+/** Clear stored appId and reset SDK so the user can enter a new one */
+function changeAppId() {
+  try {
+    localStorage.removeItem(APP_ID_STORAGE_KEY);
+  } catch {
+    //
+  }
+  sdk.value?.destroy();
+  sdk.value = null;
+  appId.value = null;
+  appIdInput.value = '';
+  config.value = null;
+  session.value = null;
+  user.value = null;
+  status.value = 'idle';
+  logs.value = [];
+}
 
-/** Request a 10 USDT deposit to this app's wallet address */
-const receive = () =>
-  runOperation('receive', 'Receive', {
-    type: 'receive' as AWOperationType,
-    amount: '10.00',
-    currency: 'USDT',
-    to: '',
-    description: 'Request deposit from Example DApp',
-  });
-
-/** Request additional scopes (balance, pay) beyond the ones declared in config */
-const requestScopes = () =>
-  runOperation('scopes', 'Scopes', {
-    type: 'scopes' as AWOperationType,
-    amount: '0',
-    currency: 'USDT',
-    to: '',
-    description: 'Request additional scopes',
-    metadata: { scopes: ['balance', 'pay'] },
-  });
+// ── Actions ───────────────────────────────────────────────────────────────
 
 /** Force-rotate the session token ahead of its expiry */
 async function refresh() {
@@ -284,40 +414,136 @@ async function checkStatus() {
   }
 }
 
-/** List the scopes currently granted to this app */
-async function getScopes() {
-  if (!sdk.value) return;
+/**
+ * DEMO ONLY — backend-to-backend intent flow run from the browser.
+ *
+ * Real apps must perform this request from their server because it requires
+ * the app's api_secret to sign the HMAC. Here we sign in the browser purely
+ * to demonstrate the request/response shape to integrators.
+ */
+async function runBackendIntent() {
+  const cfg = backendCfg.value;
+  if (!cfg.apiBase || !cfg.apiKey || !cfg.apiSecret || !cfg.telegramUserId) {
+    addLog('Backend intent demo: fill apiBase, apiKey, apiSecret, telegramUserId first', 'warn');
+    return;
+  }
+  const telegramUserIdNum = Number(cfg.telegramUserId);
+  if (!Number.isFinite(telegramUserIdNum) || !Number.isInteger(telegramUserIdNum)) {
+    addLog('Backend intent demo: telegramUserId must be an integer', 'warn');
+    return;
+  }
+  const payload: IntentRelayPayload = {
+    apiBase: cfg.apiBase,
+    apiKey: cfg.apiKey,
+    apiSecret: cfg.apiSecret,
+    type: intentType.value,
+    telegramUserId: telegramUserIdNum,
+    amount: intentAmount.value,
+  };
+  busy.value = 'b2b';
+  addLog(`[B2B ${intentType.value}] POST /api/intents (relayed to ${cfg.apiBase})`);
   try {
-    const scopes = await sdk.value.scopes.getScopes();
-    addLog(`Granted scopes: [${scopes.join(', ')}]`, 'success');
+    const { operationId, status, rawResponse } = await createBackendIntent(payload);
+    addLog(`[B2B ${intentType.value}] HTTP ${status} → ${rawResponse.slice(0, 200)}`, 'success');
+    addLog(
+      `[B2B ${intentType.value}] operationId: ${operationId}. Wait for the wallet shell + webhook to deliver the result.`,
+      'success',
+    );
   } catch (error) {
-    addLog(`Get scopes failed: ${handleSdkError(error)}`, 'error');
+    addLog(`[B2B ${intentType.value}] failed: ${handleSdkError(error)}`, 'error');
+  } finally {
+    busy.value = null;
   }
 }
 
-/** Fetch the payload exposed by each granted scope (e.g. balance, user data) */
-async function getScopeData() {
-  if (!sdk.value) return;
+/**
+ * GET /api/v2/sdk/operations/intents — lists pending intents for the current
+ * user. Requires the user's `Authorization: Bearer <jwt>` token.
+ */
+async function fetchPendingIntents() {
+  const cfg = backendCfg.value;
+  if (!cfg.apiBase) {
+    addLog('Backend intent list: fill API Base URL first', 'warn');
+    return;
+  }
+  if (!cfg.bearerToken) {
+    addLog('Backend intent list: fill Bearer Token first', 'warn');
+    return;
+  }
+  busy.value = 'intents';
+  const url = `${cfg.apiBase.replace(/\/$/, '')}/api/v2/sdk/operations/intents`;
   try {
-    const data = await sdk.value.scopes.getData();
-    addLog(`Scope data: ${JSON.stringify(data)}`, 'success');
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${cfg.bearerToken}`,
+      },
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${text}`);
+    const parsed = JSON.parse(text) as { data?: PendingIntent[] };
+    const list = Array.isArray(parsed.data) ? parsed.data : [];
+    pendingIntents.value = list;
   } catch (error) {
-    addLog(`Get scope data failed: ${handleSdkError(error)}`, 'error');
+    addLog(`[Intents] failed: ${handleSdkError(error)}`, 'error');
+  } finally {
+    busy.value = null;
   }
 }
 
-/** Probe each known SDK command for version support on the current host */
-function checkCommands() {
-  if (!sdk.value) return;
-  for (const { name, cmd } of KNOWN_COMMANDS) {
-    const ok = sdk.value.isCommandAvailable(cmd);
-    addLog(`${name}: ${ok ? 'available' : 'not available'}`, ok ? 'success' : 'warn');
+/** Open wallet's approve/reject sheet for the chosen intent */
+async function approveIntent(intent: PendingIntent) {
+  if (!sdk.value) {
+    addLog('SDK not ready', 'warn');
+    return;
+  }
+  addLog(`[Intents] requesting confirmation for ${intent.operationId}...`);
+  try {
+    const result = await sdk.value.operations.requestConfirmation(intent.operationId);
+    addLog(
+      `[Intents] ${intent.operationId} → ${result.status}${result.txId ? `, txId: ${result.txId}` : ''}`,
+      'success',
+    );
+    void fetchPendingIntents();
+  } catch (error) {
+    addLog(`[Intents] confirmation failed: ${handleSdkError(error)}`, 'error');
   }
 }
+
+function persistBackendCfg() {
+  saveBackendConfig(backendCfg.value);
+}
+
 </script>
 
 <template>
-  <div class="app">
+  <div v-if="!appId" class="app">
+    <header class="header">
+      <h1 class="header__title">Example DApp</h1>
+      <div class="header__badges">
+        <span :class="insideWallet ? 'badge -inside' : 'badge -outside'">
+          {{ insideWallet ? 'In Wallet' : 'Standalone' }}
+        </span>
+      </div>
+    </header>
+    <section class="panel">
+      <div class="panel__title">Enter App ID</div>
+      <form @submit.prevent="submitAppId">
+        <input
+          v-model="appIdInput"
+          class="input"
+          type="text"
+          placeholder="e.g. dev1"
+          autofocus
+        />
+        <button class="btn -accent" type="submit" :disabled="!appIdInput.trim()">
+          Continue
+        </button>
+      </form>
+    </section>
+  </div>
+
+  <div v-else class="app">
     <header class="header">
       <h1 class="header__title">{{ config?.name ?? 'Loading...' }}</h1>
       <div class="header__badges">
@@ -326,6 +552,8 @@ function checkCommands() {
         </span>
         <span :class="`status-dot -${status}`"></span>
         <span class="status-label">{{ status }}</span>
+        <span class="app-id">appId: {{ appId }}</span>
+        <button class="btn-link" type="button" @click="changeAppId">Change</button>
       </div>
     </header>
 
@@ -355,19 +583,6 @@ function checkCommands() {
 
     <div class="actions-grid">
       <section class="panel">
-        <div class="panel__title">Operations</div>
-        <button class="btn -accent" :disabled="disabled || busy === 'scopes'" @click="requestScopes">
-          {{ busy === 'scopes' ? '...' : 'Request Scopes' }}
-        </button>
-        <button class="btn -accent" :disabled="disabled || busy === 'pay'" @click="pay">
-          {{ busy === 'pay' ? '...' : 'Pay 5 USDT' }}
-        </button>
-        <button class="btn -accent" :disabled="disabled || busy === 'receive'" @click="receive">
-          {{ busy === 'receive' ? '...' : 'Receive 10 USDT' }}
-        </button>
-      </section>
-
-      <section class="panel">
         <div class="panel__title">Session</div>
         <button class="btn -ghost" :disabled="disabled || busy === 'refresh'" @click="refresh">
           Refresh
@@ -376,22 +591,95 @@ function checkCommands() {
           Check Status
         </button>
       </section>
-
-      <section class="panel">
-        <div class="panel__title">Scopes</div>
-        <button class="btn -ghost" :disabled="disabled" @click="getScopes">Get Scopes</button>
-        <button class="btn -ghost" :disabled="disabled" @click="getScopeData">
-          Get Scope Data
-        </button>
-      </section>
-
-      <section class="panel">
-        <div class="panel__title">Commands</div>
-        <button class="btn -ghost" :disabled="disabled" @click="checkCommands">
-          Check Available
-        </button>
-      </section>
     </div>
+
+    <section class="panel">
+      <div class="panel__title">Backend Intent (DEMO ONLY)</div>
+      <div class="warn-box">
+        ⚠️ TESTING ONLY. Real apps NEVER send <code>apiSecret</code> from
+        the browser — the secret stays on YOUR server. Here we relay through
+        our demo backend (<code>/api/intents</code>) just to make the flow
+        observable end-to-end.
+      </div>
+      <label class="field-label">API Base URL</label>
+      <input
+        class="input"
+        type="text"
+        placeholder="auto-derived from wallet origin"
+        v-model="backendCfg.apiBase"
+        @blur="persistBackendCfg"
+      />
+      <label class="field-label">API Key</label>
+      <input
+        class="input"
+        type="text"
+        placeholder="X-Sdk-App-Key"
+        v-model="backendCfg.apiKey"
+        @blur="persistBackendCfg"
+      />
+      <label class="field-label">API Secret</label>
+      <input
+        class="input"
+        type="password"
+        placeholder="HMAC secret"
+        v-model="backendCfg.apiSecret"
+        @blur="persistBackendCfg"
+      />
+      <label class="field-label">Bearer Token (for intents list)</label>
+      <input
+        class="input"
+        type="password"
+        placeholder="user JWT for Authorization header"
+        v-model="backendCfg.bearerToken"
+        @blur="persistBackendCfg"
+      />
+      <label class="field-label">Telegram User ID</label>
+      <input
+        class="input"
+        type="text"
+        placeholder="target user telegram id"
+        v-model="backendCfg.telegramUserId"
+        @blur="persistBackendCfg"
+      />
+      <label class="field-label">Intent Type</label>
+      <select class="input" v-model="intentType">
+        <option value="pay">pay</option>
+        <option value="receive">receive</option>
+      </select>
+      <label class="field-label">Amount (USDT)</label>
+      <input class="input" type="text" placeholder="5.00" v-model="intentAmount" />
+      <button class="btn -accent" :disabled="busy === 'b2b'" @click="runBackendIntent">
+        {{ busy === 'b2b' ? '...' : `Send ${intentType} intent` }}
+      </button>
+    </section>
+
+    <section class="panel">
+      <div class="panel__title">Pending Intents</div>
+      <button class="btn -ghost" :disabled="busy === 'intents'" @click="fetchPendingIntents">
+        {{ busy === 'intents' ? '...' : 'Refresh List' }}
+      </button>
+      <div v-if="pendingIntents.length === 0" class="hint">No intents loaded.</div>
+      <ul v-else class="intent-list">
+        <li v-for="it in pendingIntents" :key="it.operationId">
+          <button
+            class="intent-item"
+            type="button"
+            @click="approveIntent(it)"
+            title="Open wallet sheet to approve or reject"
+          >
+            <span class="intent-item__type">{{ it.type }}</span>
+            <span class="intent-item__id">
+              {{ it.data?.amount
+                ? `${it.data.amount} USDT`
+                : it.data?.scopes?.length
+                  ? it.data.scopes.join(', ')
+                  : `${it.operationId.slice(0, 8)}…` }}
+            </span>
+            <span class="intent-item__status">{{ it.status }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <section class="panel">
       <div class="panel__title">Event Log</div>
@@ -661,6 +949,134 @@ $log-colors: (
   &.-ghost {
     background: $border;
     color: $text-primary;
+  }
+}
+
+/**
+ * AppId input field
+ */
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid $border;
+  background: $bg-base;
+  color: $text-primary;
+  font-size: 14px;
+  font-family: inherit;
+  margin-bottom: 10px;
+  outline: none;
+
+  &:focus {
+    border-color: $accent;
+  }
+}
+
+.app-id {
+  font-size: 11px;
+  color: $text-secondary;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  margin-left: 4px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: $accent-bright;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: inherit;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/**
+ * Backend-intent demo panel
+ */
+.warn-box {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+
+  code {
+    background: rgba(245, 158, 11, 0.18);
+    padding: 0 4px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', 'Menlo', monospace;
+  }
+}
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: $text-secondary;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hint {
+  font-size: 12px;
+  color: $text-muted;
+  margin-top: 8px;
+}
+
+.intent-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.intent-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 70px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: $bg-base;
+  color: $text-primary;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: $accent;
+    background: rgba(99, 102, 241, 0.08);
+  }
+
+  &__type {
+    font-weight: 600;
+    color: $accent-bright;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  &__id {
+    font-family: 'JetBrains Mono', 'Menlo', monospace;
+    color: $text-secondary;
+  }
+
+  &__status {
+    font-size: 11px;
+    color: $text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 }
 

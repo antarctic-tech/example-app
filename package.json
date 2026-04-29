@@ -1,0 +1,20 @@
+{
+  "name": "example-embed-app",
+  "version": "1.2.0",
+  "description": "Antarctic Wallet embed app example",
+  "keywords": [
+    "example"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git@gitlab.awalltest.xyz:antarctic/frontend/example-embed-app.git"
+  },
+  "license": "MIT",
+  "author": "Antarctic Tech",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

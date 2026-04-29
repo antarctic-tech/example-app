@@ -1,6 +1,6 @@
 # Example Embed App — AW SDK
 
-Reference integrations for embed mini-apps that run inside [Antarctic Wallet] via [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
+Reference integrations for embed mini-apps that run inside [Antarctic Wallet] via [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk), plus a Node.js reference backend that signs B2B intent requests.
 
 Three framework parity ports — **React 19 / Vue 3 / Angular 19** — that render the exact same UI and exercise the same SDK surface. Pick whichever stack you use in production, read a single file top-to-bottom, and copy the pieces you need.
 
@@ -11,28 +11,45 @@ Three framework parity ports — **React 19 / Vue 3 / Angular 19** — that rend
 │  Antarctic Wallet (host) │ ◀── postMessage ──▶│  Embed app (this repo)   │
 │  — session, signing, UI  │                    │  — your dApp inside      │
 │  — user confirmations    │                    │    the wallet's iframe   │
-└──────────────────────────┘                    └──────────────────────────┘
+└──────────────────────────┘                    └────────────┬─────────────┘
+                                                             │
+                                                             ▼ HTTP
+                                              ┌──────────────────────────┐
+                                              │  Your backend            │
+                                              │  — holds api_secret      │
+                                              │  — signs B2B requests    │
+                                              │     to AW `/api/apps/v1` │
+                                              └──────────────────────────┘
 ```
 
-The wallet renders your app inside an `<iframe>` and passes its own origin via a query parameter. The embed app creates an `AWSDK` instance, which opens a typed `postMessage` channel, performs a handshake (`init`), and exposes methods for operations, scopes and session management. The user confirms payments/scopes in the wallet's native UI — never inside the iframe.
+The wallet renders your app inside an `<iframe>` and passes its own origin via a query parameter. The embed app creates an `AWSDK` instance, which opens a typed `postMessage` channel, performs a handshake (`init`), and exposes session/scopes helpers. The user confirms operations in the wallet's native UI — never inside the iframe.
+
+Operation intents (`pay` / `receive` / `scopes`) are created **server-to-server**: your backend holds the `api_secret`, signs each request with HMAC-SHA256, and `POST`s to `https://<aw>/api/apps/v1/intents`. The mini-app only triggers your backend; the secret never reaches the browser.
 
 ## Examples
 
-| Framework  | Path                                     | Bundler                        |
-|------------|------------------------------------------|--------------------------------|
-| React 19   | [`examples/react`](./examples/react)     | Vite                           |
-| Vue 3      | [`examples/vue`](./examples/vue)         | Vite                           |
-| Angular 19 | [`examples/angular`](./examples/angular) | Angular CLI (`@angular/build`) |
+| Stack         | Path                                              | Notes                          |
+|---------------|---------------------------------------------------|--------------------------------|
+| React 19      | [`examples/react`](./examples/react)              | Vite                           |
+| Vue 3         | [`examples/vue`](./examples/vue)                  | Vite                           |
+| Angular 19    | [`examples/angular`](./examples/angular)          | Angular CLI (`@angular/build`) |
+| Node backend  | [`examples/backend-node`](./examples/backend-node)| Express, no extra deps         |
 
-All three behave identically — same config, same UI, same log output.
+All three frontend examples behave identically — same config, same UI, same log output.
 
 ## Quick start
 
 ```bash
-# pick one
+# Frontend (pick one)
 cd examples/react      # or examples/vue, examples/angular
 npm install
 npm run dev            # starts the dev server
+
+# Backend (in another terminal)
+cd examples/backend-node
+cp .env.example .env   # fill AW_API_BASE / AW_API_KEY / AW_API_SECRET
+npm install
+npm start
 ```
 
 ### Production build
@@ -41,22 +58,24 @@ npm run dev            # starts the dev server
 npm run build          # output → ./dist
 ```
 
-## Walkthrough of a single example
+## Walkthrough of a single frontend example
 
 Every `App` file is laid out the same way — sections in this order:
 
-1. **Types** — `AppConfig`, `LogEntry`, `AppStatus` (`idle → connecting → ready / error`).
+1. **Types** — `AppConfig`, `LogEntry`, `AppStatus` (`idle → connecting → ready / error`), `BackendIntentConfig`.
 2. **Helpers**
    - `getParentOrigin()` — resolves the wallet origin: `?parentOrigin=…` → `document.referrer` → localhost dev-server.
    - `handleSdkError(e)` — narrows every SDK error class (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`) into a readable log line.
-   - `KNOWN_COMMANDS` — list of `AWCommand.*` values used for version probing.
+   - `createBackendIntent(payload)` — POSTs the payload to `/api/intents` of YOUR backend, returns `operationId` + raw upstream response.
 3. **SDK bootstrap** (runs once on mount / init):
    1. `AWSDK.isInsideWallet()` — detects iframe vs standalone run.
    2. `fetch('./config.json')` — reads `appId` + `requiredScopes`.
    3. `new AWSDK({ appId, scopes, parentOrigin, debug, retry, persistSession, timeout })`.
    4. Subscribes to every SDK event (see [Events](#sdk-events)).
    5. `await sdk.init()` — handshake with the host.
-4. **Actions** — one method per UI button, calling the SDK.
+4. **App ID prompt** — on first load, the demo asks for the `appId` to use, persists it in `localStorage` (key `aw-demo:appId`), and lets the user override via `?appId=` in the URL. A `Change` button in the header resets it.
+5. **Backend Intent panel** — DEMO UI for the B2B flow. Form fields (`API Base URL`, `API Key`, `API Secret`, `Bearer Token`, `Telegram User ID`) persist in `localStorage` (`aw-demo:backendIntent:v2`). The intent-type selector exposes `pay` / `receive` (with an `Amount` input). Clicking `Send` POSTs everything to `/api/intents` of the demo backend, which signs the HMAC and forwards to AW.
+6. **Pending Intents panel** — once `apiBase` and `bearerToken` are filled in, the panel auto-polls `GET /api/v2/sdk/operations/intents` every 5 seconds and renders the list. Clicking an intent calls `sdk.operations.requestConfirmation(operationId)`, which opens the wallet's native approve/reject sheet.
 
 ## App configuration — `public/config.json`
 
@@ -106,35 +125,10 @@ await sdk.init();
 |------------------------|------------------------------------------------------------------------|
 | `sdk.ready`            | Handshake complete. Payload: `AWSession` (token, expiry, scopes, user). |
 | `sdk.error`            | Fatal SDK error (bad origin, host unreachable, init failed).           |
-| `scopes.granted`       | User approved additional scopes via a `scopes` operation.              |
+| `scopes.granted`       | User approved additional scopes.                                       |
 | `session.refreshed`    | Token rotated (auto-refresh or manual `refreshSession()`).             |
 | `session.expired`      | Session is no longer valid — re-initialise.                            |
 | `operation.rejected`   | User declined to confirm an operation in the wallet.                   |
-
-### Operations — `prepare → requestConfirmation`
-
-All payable actions follow the same two-step pattern:
-
-```ts
-const intent = await sdk.operations.prepare({
-  type: 'pay',          // 'pay' | 'receive' | 'scopes'
-  amount: '5.00',
-  currency: 'USDT',
-  to: 'T...',
-  description: 'Test payment',
-  metadata: { orderId: 'demo-001' },
-});
-
-const result = await sdk.operations.requestConfirmation(intent.operationId);
-// result.status === 'confirmed' | 'rejected' | ...
-// result.txId  (for on-chain operations)
-```
-
-| Operation   | What it does                                                              |
-|-------------|---------------------------------------------------------------------------|
-| `pay`       | Transfers funds from the user's wallet to `to`. User confirms in wallet UI. |
-| `receive`   | Generates a deposit intent (QR / address) for this app.                   |
-| `scopes`    | Requests additional scopes at runtime (see `metadata.scopes`).            |
 
 ### Session
 
@@ -146,28 +140,10 @@ await sdk.refreshSession();  // force-rotate the token
 
 ### Scopes
 
-Scopes are **declared** up-front in `requiredScopes` and confirmed by the user during `sdk.init()`. Additional scopes can be requested later via a `scopes` operation. The embed app doesn't poll the host for its scope set — it already knows them from:
+Scopes are **declared** up-front in `requiredScopes` and confirmed by the user during `sdk.init()`. Additional scopes can be requested later via a B2B intent of type `scopes`.
 
-- `requiredScopes` in `config.json` — what the app asks for
-- `AWSession.grantedScopes` on `sdk.ready` / `scopes.granted` events — what the user actually granted
-
-```ts
-// request extra scopes at runtime
-await sdk.operations.prepare({
-  type: 'scopes',
-  metadata: { scopes: ['balance', 'pay'] },
-  amount: '0', currency: 'USDT', to: '',
-});
-// → fires `scopes.granted` with the new list on approval
-```
-
-### Command versioning
-
-```ts
-sdk.isCommandAvailable(AWCommand.PrepareOperation);  // boolean
-```
-
-Use this to feature-gate calls against older wallet versions that might not implement newer commands yet.
+- `requiredScopes` in `config.json` — what the app asks for.
+- `AWSession.grantedScopes` on `sdk.ready` / `scopes.granted` events — what the user actually granted.
 
 ### Error handling
 
@@ -183,10 +159,77 @@ The SDK throws typed errors — handle them explicitly:
 
 `handleSdkError()` in each example demonstrates the full `instanceof` narrowing pattern.
 
+## Backend B2B flow
+
+> **Why this changed.** Earlier the mini-app frontend called
+> `sdk.operations.prepare()`, which routed the intent through the wallet's
+> session token. Anyone able to observe the iframe traffic could replay the
+> request. The intent endpoint is now **server-to-server only** and the
+> frontend never sees it. The mini-app SDK only handles the user-confirmation
+> step.
+
+The flow is three parties:
+
+```
+┌─────────┐     1. ask for intent      ┌──────────────┐  2. signed POST  ┌───────┐
+│ Mini-app│  ─────────────────────────▶│ YOUR backend │ ───────────────▶ │  AWP  │
+│ frontend│                            │              │  /api/apps/v1/   │  API  │
+│         │ ◀─── 3. { operationId } ── │  HMAC sign   │      intents     │       │
+└─────────┘                            └──────────────┘                  └───────┘
+     │
+     │ 4. sdk.operations.requestConfirmation(operationId)
+     ▼
+┌──────────┐
+│  Wallet  │  shows native confirm UI → user approves → result returned to SDK
+└──────────┘
+```
+
+### 1) Your backend — sign and create the intent
+
+```http
+POST /api/apps/v1/intents
+Content-Type: application/json
+X-Sdk-App-Key:       ak_…
+X-Sdk-App-Timestamp: 1777331579
+X-Sdk-App-Signature: <hmac-sha256-hex>
+
+{
+  "telegram_user_id": 999888777,
+  "type": "pay",                         // 'pay' | 'receive'
+  "data": { "amount": "50.00" }
+}
+```
+
+```
+signed     = `${timestamp}.POST./api/apps/v1/intents.${sha256(rawBody)}`
+signature  = HMAC_SHA256(api_secret, signed) // hex
+```
+
+Drift > 5 minutes returns `STALE_REQUEST` (401). `api_key` / `api_secret` are issued per mini-app and **must never ship to the browser**.
+
+Two reference implementations are shipped:
+
+- [`examples/backend-node/server.mjs`](./examples/backend-node/server.mjs) — runnable Express service. The demo deploy hosts it at `POST /api/intents`, accepts `apiBase / apiKey / apiSecret` in the request body (DEMO ONLY) and forwards to AWP.
+- `examples/{react,vue,angular}/src/integrator-backend.ts` — the same signing logic as a single-file TypeScript snippet you can copy into your own server-side handler.
+
+### 2) Mini-app frontend — confirm the intent
+
+```ts
+// `operationId` came from your backend in step 1.
+const result = await sdk.operations.requestConfirmation(operationId);
+// result.status === 'confirmed' | 'rejected' | ...
+// result.txId   (for on-chain operations)
+```
+
+### Demo shortcut
+
+The deployed demo backend accepts `apiKey` / `apiSecret` from the request body so integrators can experiment without setting them in env, and tags the response with `X-Demo-Warning`. **Never do this in real apps** — your secret stays only on your server.
+
 ## Dependencies
 
-| Framework | Runtime deps                                                      | Dev deps                                   |
-|-----------|-------------------------------------------------------------------|--------------------------------------------|
-| React     | `react`, `react-dom`, `@antarctic-wallet/aw-sdk`                  | `vite`, `@vitejs/plugin-react`, `typescript`  |
-| Vue       | `vue`, `@antarctic-wallet/aw-sdk`                                 | `vite`, `@vitejs/plugin-vue`, `sass`, `typescript` |
-| Angular   | `@angular/*`, `rxjs`, `zone.js`, `@antarctic-wallet/aw-sdk`       | `@angular/build`, `@angular/cli`, `typescript` |
+| Stack          | Runtime deps                                                      | Dev deps                                            |
+|----------------|-------------------------------------------------------------------|-----------------------------------------------------|
+| React          | `react`, `react-dom`, `@antarctic-wallet/aw-sdk`                  | `vite`, `@vitejs/plugin-react`, `typescript`        |
+| Vue            | `vue`, `@antarctic-wallet/aw-sdk`                                 | `vite`, `@vitejs/plugin-vue`, `sass`, `typescript`  |
+| Angular        | `@angular/*`, `rxjs`, `zone.js`, `@antarctic-wallet/aw-sdk`       | `@angular/build`, `@angular/cli`, `typescript`      |
+| Node backend   | `express`                                                         | —                                                   |
