@@ -150,7 +150,11 @@ export function Pay() {
     return data.userId;
   }
 
-  async function createPayIntent(amount: string): Promise<string> {
+  async function createPayIntent(amount: string): Promise<{
+    operationId: string;
+    status: string | null;
+    failureReason: string | null;
+  }> {
     const idToken = currentIdToken();
     if (!idToken) throw new Error('Нет idToken — нельзя создать интент');
     const response = await fetch('/api/intents', {
@@ -172,7 +176,10 @@ export function Pay() {
     }
     const operationId = readOperationId(parsed);
     if (!operationId) throw new Error(`В ответе нет operationId: ${text}`);
-    return operationId;
+    const status = typeof parsed.status === 'string' ? parsed.status : null;
+    const failureReason =
+      typeof parsed.failureReason === 'string' ? parsed.failureReason : null;
+    return { operationId, status, failureReason };
   }
 
   async function donate() {
@@ -184,7 +191,16 @@ export function Pay() {
     setBusy(true);
     setMessage('Создаём pay-интент…');
     try {
-      const operationId = await createPayIntent(DONATE_AMOUNT);
+      const { operationId, status: intentStatus, failureReason } =
+        await createPayIntent(DONATE_AMOUNT);
+      if (intentStatus === 'failed') {
+        setMessage(`Донат: ${failureReason ?? 'failed'}`);
+        return;
+      }
+      if (intentStatus === 'approved') {
+        setMessage('Донат: approved');
+        return;
+      }
       setMessage('Подтвердите в кошельке…');
       const result = await instance.operations.requestConfirmation(operationId);
       setMessage(`Донат: ${result.status}${result.txId ? ` · ${result.txId}` : ''}`);

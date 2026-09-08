@@ -11,7 +11,7 @@ Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 | --------------------- | -------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------- |
 | **Вход**              | Авторизация пользователя, получение доверенного `userId` | [`src/scenarios/Auth.vue`](./src/scenarios/Auth.vue)           | `userData`                   |
 | **Донат**             | Вход + односторонний платёж (без возврата)               | [`src/scenarios/Pay.vue`](./src/scenarios/Pay.vue)             | `userData`, `pay`            |
-| **Покупка и возврат** | Вход + покупка + возврат                                 | [`src/scenarios/PayRefund.vue`](./src/scenarios/PayRefund.vue) | `userData`, `pay`, `receive` |
+| **Покупка и возврат** | Вход + покупка + возврат                                 | [`src/scenarios/PayRefund.vue`](./src/scenarios/PayRefund.vue) | `userData`, `pay`            |
 
 ---
 
@@ -36,9 +36,8 @@ npm start            # http://127.0.0.1:3351
 
 ```
 AW_API_BASE=https://api.example.com
-AW_API_KEY=ak_…
+AW_APP_ID=ваш-app-id
 AW_API_SECRET=…
-AW_WEBHOOK_SECRET=…
 PORT=3351
 ```
 
@@ -70,7 +69,7 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
   "description": "Полное описание на странице приложения в кошельке.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay", "receive"]
+  "requiredScopes": ["userData", "pay"]
 }
 ```
 
@@ -86,8 +85,8 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
 
 | Что положить | Куда                               |
 | ------------ | ---------------------------------- |
-| `appId`      | `public/config.json` → поле `id`   |
-| Ключи API    | `.env` бэкенда (никогда в браузер) |
+| `appId`      | `public/config.json` → `id` и `AW_APP_ID` в `.env` бэкенда |
+| Секрет API   | `.env` бэкенда (никогда в браузер) |
 
 Vite проксирует `/api` → бэкенд. Секреты живут **только** на сервере.
 
@@ -98,7 +97,7 @@ Vite проксирует `/api` → бэкенд. Секреты живут **�
 ```
 Кошелёк (AW)              Мини-апка (браузер)           Ваш бэкенд
 ────────────              ──────────────────           ──────────
-iframe + нативный UI      ваш фронт + SDK             секрет, HMAC, сессии
+iframe + нативный UI      ваш фронт + SDK             секрет, сессии
 подтверждает операции     postMessage ↔ кошелёк       проверяет idToken
                           просит ваш сервер           создаёт интент в AW
 ```
@@ -106,7 +105,7 @@ iframe + нативный UI      ваш фронт + SDK             секре
 1. Кошелёк открывает ваш фронт в iframe.
 2. Пользователь нажимает «Войти» → SDK делает хендшейк с кошельком.
 3. Фронт получает `idToken` и шлёт его на **ваш** сервер для проверки.
-4. Для платежа: фронт просит **ваш** сервер создать интент → сервер подписывает HMAC и создаёт интент в AW → фронт показывает лист подтверждения в кошельке.
+4. Для платежа: фронт просит **ваш** сервер создать интент → сервер создаёт интент в AW → фронт показывает лист подтверждения в кошельке.
 
 ---
 
@@ -221,7 +220,11 @@ function getParentOrigin(): string {
 Пользователь нажимает кнопку → SDK делает хендшейк → фронт получает `idToken` →
 шлёт его на ваш бэкенд → бэкенд проверяет подпись и возвращает `userId`.
 
-`userContext` (имя, аватар) — **только для UI**. На бэкенде ему нельзя доверять.
+`userId` — это `sub` из токена: строка-идентификатор **в вашем приложении**,
+не номер аккаунта AW и не то, что нарисовано в `userContext`.
+
+Имя и аватар (`userContext`) — **только для UI**. На бэкенде им нельзя доверять:
+их прислал браузер, их можно подменить.
 
 ### Фронт
 
@@ -237,7 +240,7 @@ async function verifyIdentity(idToken: string) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const { userId } = await res.json();
-  // userId — ключ вашей сессии, проверен на бэкенде
+  // userId = sub из токена: ключ вашей сессии, не «id с экрана»
 }
 ```
 
@@ -251,8 +254,12 @@ const jwks = createRemoteJWKSet(
 );
 
 app.post("/api/auth/session", express.json(), async (req, res) => {
-  const { payload } = await jwtVerify(req.body.idToken, jwks, { issuer: "aw" });
+  const { payload } = await jwtVerify(req.body.idToken, jwks, {
+    issuer: "aw",
+    audience: process.env.AW_APP_ID,
+  });
   const userId = String(payload.sub);
+  // sub — id пользователя в ЭТОМ приложении (строка), не номер аккаунта AW
 
   if (!userId) return res.status(401).json({ error: "INVALID_ID_TOKEN" });
 
@@ -298,45 +305,34 @@ async function pay(amount: string) {
 ### Бэкенд
 
 ```js
-import { createHash, createHmac } from "node:crypto";
-
-const sha256 = (msg) => createHash("sha256").update(msg, "utf8").digest("hex");
-const hmacSha256 = (secret, msg) =>
-  createHmac("sha256", secret).update(msg, "utf8").digest("hex");
-
 app.post("/api/intents", express.json(), async (req, res) => {
-  // 1. Проверяем idToken — берём user_id из sub, не из тела запроса
-  const { payload } = await jwtVerify(req.body.idToken, jwks, { issuer: "aw" });
-  const userId = Number(payload.sub);
+  // 1. Проверяем idToken — берём user_app_login из sub, не из тела запроса
+  const { payload } = await jwtVerify(req.body.idToken, jwks, {
+    issuer: "aw",
+    audience: process.env.AW_APP_ID,
+  });
+  const userAppLogin = String(payload.sub);
 
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return res.status(422).json({ error: "USER_ID_REQUIRED" });
+  if (!userAppLogin) {
+    return res.status(401).json({ error: "INVALID_ID_TOKEN" });
   }
 
   // 2. Формируем тело для AW
   const body = JSON.stringify({
     type: req.body.type, // 'pay'
-    user_id: userId, // из токена, НЕ из req.body
+    user_app_login: userAppLogin, // из токена, НЕ из req.body
     data: { amount: req.body.amount },
   });
 
-  // 3. Подписываем HMAC
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = hmacSha256(
-    process.env.AW_API_SECRET,
-    `${timestamp}.POST./api/apps/v1/intents.${sha256(body)}`,
-  );
-
-  // 4. Отправляем в AW
+  // 3. Отправляем в AW
   const upstream = await fetch(
     `${process.env.AW_API_BASE}/api/apps/v1/intents`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Sdk-App-Key": process.env.AW_API_KEY,
-        "X-Sdk-App-Timestamp": timestamp,
-        "X-Sdk-App-Signature": signature,
+        "X-Aw-App-Id": process.env.AW_APP_ID,
+        Authorization: `Bearer ${process.env.AW_API_SECRET}`,
       },
       body,
     },
@@ -363,8 +359,12 @@ app.post("/api/intents", express.json(), async (req, res) => {
 
 Тот же эндпоинт `/api/intents`, отличается только `type`:
 
-- **Купить** → `type: 'pay'`
-- **Вернуть** → `type: 'receive'`
+- **Купить** → `type: 'pay'`. Пользователь ещё нажмёт «подтвердить» в кошельке.
+- **Вернуть** → `type: 'receive'`. Деньги уходят сразу, листа в кошельке нет.
+  Смотрите `status` в ответе сервера (`approved` / `failed`).
+
+`receive` — это тип операции, не отдельный scope. В SDK достаточно
+`userData` и `pay`.
 
 ### Фронт
 
@@ -382,12 +382,16 @@ async function createIntent(type: "pay" | "receive", amount: string) {
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const { operationId } = await res.json();
-  return operationId as string;
+  const { operationId, status, failureReason } = await res.json();
+  return { operationId, status, failureReason } as {
+    operationId: string;
+    status?: string;
+    failureReason?: string;
+  };
 }
 
 async function buy(amount: string) {
-  const operationId = await createIntent("pay", amount);
+  const { operationId } = await createIntent("pay", amount);
   const result = await sdk.value!.operations.requestConfirmation(operationId);
 
   if (result.status === "confirmed") {
@@ -396,11 +400,12 @@ async function buy(amount: string) {
 }
 
 async function refund(amount: string) {
-  const operationId = await createIntent("receive", amount);
-  const result = await sdk.value!.operations.requestConfirmation(operationId);
+  const { status, failureReason } = await createIntent("receive", amount);
 
-  if (result.status === "confirmed") {
+  if (status === "approved") {
     // Сохранить заказ как возвращённый на своём бэкенде
+  } else {
+    throw new Error(failureReason ?? status ?? "receive failed");
   }
 }
 ```
@@ -408,7 +413,7 @@ async function refund(amount: string) {
 ### Бэкенд
 
 Тот же `POST /api/intents` из раздела 3. Сервер принимает `type: 'pay'` или
-`type: 'receive'` — логика подписи одинаковая.
+`type: 'receive'` — заголовки те же.
 
 В проде статус заказа (оплачен / возвращён) храните **на своём бэкенде** и
 закрывайте через вебхук, а не по ответу из браузера.
@@ -420,9 +425,9 @@ async function refund(amount: string) {
 ## Важные правила
 
 1. **Секрет только на сервере.** `AW_API_SECRET` никогда не попадает в браузер.
-2. **Пользователь = `sub` из проверенного `idToken`.** Не доверяйте `userContext` (IDOR).
-3. **Интент создаёт сервер.** Фронт только показывает лист подтверждения.
-4. **`user_id` берётся из `sub` токена.** Не из тела запроса клиента.
+2. **Пользователь — `sub` из проверенного `idToken`.** Имя и аватар из SDK не доказательство.
+3. **Интент создаёт сервер.** Для `pay` фронт показывает лист в кошельке; `receive` уже выполнен в ответе.
+4. **В AW уходит `user_app_login` (= `sub`).** Не `user_id` и не то, что прислал браузер.
 
 ---
 

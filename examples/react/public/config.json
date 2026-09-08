@@ -5,5 +5,5 @@
   "description": "Три сценария: вход, донат, покупка и возврат. Скоупы в манифесте — для каталога кошелька; каждый экран запрашивает только своё.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay", "receive"]
+  "requiredScopes": ["userData", "pay"]
 }

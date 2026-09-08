@@ -2,7 +2,8 @@
  * Сценарий: покупка (pay) и возврат (receive).
  *
  * Заказ в проде — на вашем бэкенде. В демо статус только в UI.
- * Скоупы заданы в этом файле.
+ * receive исполняется сразу, без листа в кошельке.
+ * Скоупы заданы в этом файле (`userData`, `pay`). `receive` — тип интента, не scope.
  */
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
@@ -14,7 +15,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData', 'pay', 'receive'] as const;
+const SCOPES = ['userData', 'pay'] as const;
 const ITEM_AMOUNT = '9.00';
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';
@@ -195,8 +196,18 @@ export class PayRefundComponent implements OnInit, OnDestroy {
     this.busy = true;
     this.message = 'Создаём pay-интент…';
     try {
-      const operationId = await this.createIntent('pay', ITEM_AMOUNT);
+      const { operationId, status: intentStatus, failureReason } =
+        await this.createIntent('pay', ITEM_AMOUNT);
       this.orderStatus = 'unpaid';
+      if (intentStatus === 'failed') {
+        this.message = `Оплата: ${failureReason ?? 'failed'}`;
+        return;
+      }
+      if (intentStatus === 'approved') {
+        this.orderStatus = 'paid';
+        this.message = 'Оплачено. Можно вернуть.';
+        return;
+      }
       this.message = 'Подтвердите оплату в кошельке…';
       const result = await instance.operations.requestConfirmation(operationId);
       if (result.status !== 'confirmed') {
@@ -213,16 +224,13 @@ export class PayRefundComponent implements OnInit, OnDestroy {
   }
 
   async refund() {
-    const instance = this.sdk;
-    if (!instance || !this.currentIdToken()) return;
+    if (!this.currentIdToken()) return;
     this.busy = true;
     this.message = 'Создаём receive-интент…';
     try {
-      const operationId = await this.createIntent('receive', ITEM_AMOUNT);
-      this.message = 'Подтвердите возврат в кошельке…';
-      const result = await instance.operations.requestConfirmation(operationId);
-      if (result.status !== 'confirmed') {
-        this.message = `Возврат: ${result.status}`;
+      const { status, failureReason } = await this.createIntent('receive', ITEM_AMOUNT);
+      if (status !== 'approved') {
+        this.message = `Возврат: ${failureReason ?? status ?? 'failed'}`;
         return;
       }
       this.orderStatus = 'refunded';
@@ -256,7 +264,10 @@ export class PayRefundComponent implements OnInit, OnDestroy {
     this.trustedUserId = data.userId;
   }
 
-  private async createIntent(type: 'pay' | 'receive', amount: string): Promise<string> {
+  private async createIntent(
+    type: 'pay' | 'receive',
+    amount: string,
+  ): Promise<{ operationId: string; status: string | null; failureReason: string | null }> {
     const idToken = this.currentIdToken();
     if (!idToken) throw new Error('Нет idToken — нельзя создать интент');
     const response = await fetch('/api/intents', {
@@ -276,7 +287,10 @@ export class PayRefundComponent implements OnInit, OnDestroy {
     }
     const operationId = readOperationId(parsed);
     if (!operationId) throw new Error(`В ответе нет operationId: ${text}`);
-    return operationId;
+    const status = typeof parsed['status'] === 'string' ? parsed['status'] : null;
+    const failureReason =
+      typeof parsed['failureReason'] === 'string' ? parsed['failureReason'] : null;
+    return { operationId, status, failureReason };
   }
 
   private async prepareSdk() {

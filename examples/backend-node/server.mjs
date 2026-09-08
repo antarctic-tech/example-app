@@ -2,31 +2,38 @@
  * Бэкенд вашей мини-апки, не API Antarctic Wallet (AW).
  *
  * После чтения файла сверху вниз должно быть ясно:
- *   1. Секреты живут в env (AW_API_KEY / AW_API_SECRET / AW_API_BASE).
- *   2. Кто пользователь — из проверенного idToken, не из тела запроса клиента.
- *   3. Интент = HMAC POST в AW /api/apps/v1/intents.
- *   4. После operationId мини-апка зовёт только sdk.operations.requestConfirmation.
+ *   1. Секреты живут в env (AW_APP_ID / AW_API_SECRET / AW_API_BASE).
+ *   2. Кто пользователь — из проверенного idToken: sub = непрозрачный
+ *      user_app_login (не глобальный numeric user_id). KYC-флаги — клеймы токена.
+ *   3. Интент = POST в AW /api/apps/v1/intents (X-Aw-App-Id + Bearer).
+ *      В теле AW — user_app_login, никогда user_id (422 USER_ID_NOT_ACCEPTED).
+ *   4. pay / scopes: после operationId мини-апка зовёт requestConfirmation.
+ *      receive исполняется сразу, лист в кошельке не нужен.
  *
  * Эндпоинты:
- *   POST /api/auth/session  { idToken }              → { userId, tgId? }
- *   POST /api/intents       { idToken, type, ... }   → { operationId }
- *   POST /api/webhooks      AW → этот сервер (подписанный)
+ *   POST /api/auth/session  { idToken }              → { userId, hasKyc? }
+ *   POST /api/intents       { idToken, type, ... }   → { operationId, status }
+ *   POST /api/webhooks      AW → этот сервер (подписанный app_secret)
  *   GET  /health
  */
 import express from "express";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number.parseInt(process.env.PORT ?? "3000", 10);
 const AW_API_BASE = (process.env.AW_API_BASE ?? "").replace(/\/$/, "");
-const AW_API_KEY = process.env.AW_API_KEY ?? "";
+const AW_APP_ID = process.env.AW_APP_ID ?? "";
 const AW_API_SECRET = process.env.AW_API_SECRET ?? "";
-const AW_WEBHOOK_SECRET = process.env.AW_WEBHOOK_SECRET ?? "";
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? "*";
 const defaultPublicDir = resolve(here, "public");
 const STATIC_DIR =
@@ -36,7 +43,7 @@ const STATIC_DIR =
 const AW_ISSUER = "aw";
 const AW_INTENTS_PATH = "/api/apps/v1/intents";
 const VALID_TYPES = new Set(["pay", "receive", "scopes"]);
-/** Вебхук с дрейфом часов > 5 мин отклоняем — так же, как AW отклоняет STALE_REQUEST. */
+/** Вебхук с дрейфом часов > 5 мин отклоняем. */
 const WEBHOOK_MAX_SKEW_SEC = 300;
 
 let jwks = null;
@@ -51,9 +58,9 @@ if (AW_API_BASE) {
   }
 }
 
-if (!AW_API_BASE || !AW_API_KEY || !AW_API_SECRET) {
+if (!AW_API_BASE || !AW_APP_ID || !AW_API_SECRET) {
   console.warn(
-    "[boot] Missing AW_API_BASE / AW_API_KEY / AW_API_SECRET — /api/intents will return 500 until they are set.",
+    "[boot] Missing AW_API_BASE / AW_APP_ID / AW_API_SECRET — /api/intents will return 500 until they are set.",
   );
 }
 
@@ -77,9 +84,9 @@ function httpError(status, code, extra) {
   return error;
 }
 
-function parsePositiveInt(value) {
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : null;
+/** Только для этого демо: каждый вызов даёт НОВЫЙ id. Не копируйте в прод. */
+function newReferenceId(prefix) {
+  return `${prefix}-${Date.now()}-${randomBytes(4).toString("hex")}`;
 }
 
 /**
@@ -98,9 +105,26 @@ function readOperationId(parsed) {
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
+function readIntentStatus(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const nested =
+    parsed.data && typeof parsed.data === "object" ? parsed.data : null;
+  const status = nested?.status ?? parsed.status;
+  return typeof status === "string" && status.length > 0 ? status : null;
+}
+
+function readFailureReason(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const nested =
+    parsed.data && typeof parsed.data === "object" ? parsed.data : null;
+  const reason = nested?.failureReason ?? nested?.failure_reason ?? parsed.failureReason;
+  return typeof reason === "string" && reason.length > 0 ? reason : null;
+}
+
 /**
  * Проверка JWT кошелька по JWKS.
- * Личность = payload.sub (числовой user_id для интентов).
+ * Личность = payload.sub = непрозрачный user_app_login (16 hex), не глобальный id.
+ * При scope userData в токене ещё hasKyc / hasKycData / kycCountry.
  * userContext и userId из клиента не берём — их можно подменить (IDOR).
  */
 async function verifyIdToken(idToken) {
@@ -113,18 +137,21 @@ async function verifyIdToken(idToken) {
     throw httpError(400, "ID_TOKEN_REQUIRED");
   }
   try {
-    const { payload } = await jwtVerify(idToken, jwks, {
-      issuer: AW_ISSUER,
-      // В проде добавьте audience: ваш appId.
-    });
-    const userId = payload.sub == null ? "" : String(payload.sub);
-    if (!userId) {
+    const verifyOpts = { issuer: AW_ISSUER };
+    if (AW_APP_ID) verifyOpts.audience = AW_APP_ID;
+    const { payload } = await jwtVerify(idToken, jwks, verifyOpts);
+    const userAppLogin = payload.sub == null ? "" : String(payload.sub);
+    if (!userAppLogin) {
       throw httpError(401, "INVALID_ID_TOKEN", { reason: "missing_sub" });
     }
     return {
-      userId,
-      awUserId: parsePositiveInt(payload.sub),
-      tgId: parsePositiveInt(payload.tg_id),
+      userId: userAppLogin,
+      userAppLogin,
+      hasKyc: typeof payload.hasKyc === "boolean" ? payload.hasKyc : null,
+      hasKycData:
+        typeof payload.hasKycData === "boolean" ? payload.hasKycData : null,
+      kycCountry:
+        typeof payload.kycCountry === "string" ? payload.kycCountry : null,
       exp: payload.exp,
     };
   } catch (error) {
@@ -138,12 +165,14 @@ async function verifyIdToken(idToken) {
 
 /**
  * Тело B2B-запроса в AW.
- * user_id всегда из проверенного sub, никогда из req.body.
+ * user_app_login всегда из проверенного sub, никогда из req.body.
+ * user_id в AW больше не принимается (422 USER_ID_NOT_ACCEPTED).
  * reference_id — id вашего заказа; в проде берите из своей БД, не от клиента.
+ * Для receive reference_id обязателен: без него повтор по таймауту даст второй перевод.
  */
-function buildIntentPayload({ type, userId, amount, scopes, referenceId }) {
+function buildIntentPayload({ type, userAppLogin, amount, scopes, referenceId }) {
   if (!VALID_TYPES.has(type)) throw httpError(422, "INVALID_TYPE");
-  const payload = { type, user_id: userId };
+  const payload = { type, user_app_login: userAppLogin };
   if (referenceId) payload.reference_id = referenceId;
   if (type === "scopes") {
     const list = Array.isArray(scopes)
@@ -156,34 +185,26 @@ function buildIntentPayload({ type, userId, amount, scopes, referenceId }) {
   if (typeof amount !== "string" || amount.trim() === "") {
     throw httpError(422, "AMOUNT_REQUIRED");
   }
+  if (type === "receive" && !referenceId) {
+    throw httpError(422, "REFERENCE_ID_REQUIRED");
+  }
   payload.data = { amount };
   return payload;
 }
 
 /**
- * Подписать HMAC и отправить интент в AW.
- * Ключи только из env, браузер их не видит.
- *
- * Подпись: hex(HMAC-SHA256(secret, "{ts}.POST.{path}.{sha256(body)}"))
+ * Отправить интент в AW.
+ * appId и секрет только из env, браузер их не видит.
  */
 async function forwardIntent(payload) {
-  const method = "POST";
-  const raw = JSON.stringify(payload);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = hmacSha256Hex(
-    AW_API_SECRET,
-    `${timestamp}.${method}.${AW_INTENTS_PATH}.${sha256Hex(raw)}`,
-  );
-  const url = `${AW_API_BASE}${AW_INTENTS_PATH}`;
-  const upstream = await fetch(url, {
-    method,
+  const upstream = await fetch(`${AW_API_BASE}${AW_INTENTS_PATH}`, {
+    method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Sdk-App-Key": AW_API_KEY,
-      "X-Sdk-App-Timestamp": timestamp,
-      "X-Sdk-App-Signature": signature,
+      "X-Aw-App-Id": AW_APP_ID,
+      Authorization: `Bearer ${AW_API_SECRET}`,
     },
-    body: raw,
+    body: JSON.stringify(payload),
   });
 
   const body = await upstream.text();
@@ -191,7 +212,7 @@ async function forwardIntent(payload) {
 }
 
 /**
- * Проверка вебхука AW: hex(HMAC-SHA256(webhook_secret, "{ts}.{sha256(rawBody)}")).
+ * Проверка вебхука AW: hex(HMAC-SHA256(AW_API_SECRET, "{ts}.{sha256(rawBody)}")).
  * Считаем по сырому телу — JSON.parse ломает подпись.
  */
 function verifyWebhookSignature(rawBody, timestamp, signature, secret) {
@@ -227,15 +248,23 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 /**
  * Как ваш сервер проверяет JWT кошелька.
- * Сессию ключуйте по userId (sub), не по userContext.
+ * Сессию ключуйте по userAppLogin (sub), не по userContext.
  */
 app.post(
   "/api/auth/session",
   express.json({ limit: "8kb" }),
   async (req, res) => {
     try {
-      const { userId, tgId, exp } = await verifyIdToken(req.body?.idToken);
-      return res.json({ ok: true, userId, tgId, expiresAt: exp });
+      const identity = await verifyIdToken(req.body?.idToken);
+      return res.json({
+        ok: true,
+        userId: identity.userAppLogin,
+        userAppLogin: identity.userAppLogin,
+        hasKyc: identity.hasKyc,
+        hasKycData: identity.hasKycData,
+        kycCountry: identity.kycCountry,
+        expiresAt: identity.exp,
+      });
     } catch (error) {
       console.error(
         "[auth] id_token verify failed:",
@@ -249,28 +278,31 @@ app.post(
 /**
  * Как ваш сервер создаёт интент.
  * Браузер шлёт idToken + type + amount.
- * Секреты и user_id из клиента не принимаем — даже если прислали, игнорируем.
+ * Секреты, user_id и user_app_login из клиента не принимаем — даже если прислали, игнорируем.
  */
 app.post("/api/intents", express.json({ limit: "16kb" }), async (req, res) => {
-  if (!AW_API_BASE || !AW_API_KEY || !AW_API_SECRET) {
+  if (!AW_API_BASE || !AW_APP_ID || !AW_API_SECRET) {
     return res.status(500).json({
       error: "MISSING_CREDENTIALS",
-      hint: "Set AW_API_BASE, AW_API_KEY, AW_API_SECRET in env. Never send them from the browser.",
+      hint: "Set AW_API_BASE, AW_APP_ID, AW_API_SECRET in env. Never send them from the browser.",
     });
   }
   try {
     const identity = await verifyIdToken(req.body?.idToken);
-    if (identity.awUserId == null) {
-      throw httpError(422, "USER_ID_REQUIRED", {
-        hint: "Verified idToken sub is not a positive integer user_id.",
-      });
-    }
+    const type = req.body?.type;
     const payload = buildIntentPayload({
-      type: req.body?.type,
+      type,
       amount: req.body?.amount,
       scopes: req.body?.scopes,
-      userId: identity.awUserId,
-      // В проде: reference_id из вашей строки заказа, не из клиента.
+      userAppLogin: identity.userAppLogin,
+      // receive без reference_id AW отвергает (422): иначе повтор после
+      // таймаута переведёт деньги второй раз.
+      //
+      // Здесь id случайный — только чтобы демо собралось. Повтор того же
+      // refund из браузера = второй перевод. В проде берите стабильный id
+      // заказа из СВОЕЙ БД, например `refund-${order.id}`, и не принимайте
+      // его из req.body.
+      referenceId: type === "receive" ? newReferenceId("rcv") : undefined,
     });
     const upstream = await forwardIntent(payload);
     let parsed = null;
@@ -292,7 +324,12 @@ app.post("/api/intents", express.json({ limit: "16kb" }), async (req, res) => {
     }
     const operationId = readOperationId(parsed);
     if (!operationId) return res.status(502).json({ error: "NO_OPERATION_ID" });
-    return res.json({ operationId });
+    const status = readIntentStatus(parsed);
+    const failureReason = readFailureReason(parsed);
+    const body = { operationId };
+    if (status) body.status = status;
+    if (failureReason) body.failureReason = failureReason;
+    return res.json(body);
   } catch (error) {
     if (error.status) return sendError(res, error);
     console.error("[intents] upstream error", error);
@@ -301,8 +338,9 @@ app.post("/api/intents", express.json({ limit: "16kb" }), async (req, res) => {
 });
 
 /**
- * AW → ваш сервер после approve/reject в кошельке.
+ * AW → ваш сервер после approve/reject / авто-исполнения receive.
  * webhook_url задаётся на SdkApp в кабинете.
+ * Подпись — HMAC тем же AW_API_SECRET, что и Bearer.
  * В проде: обновить заказ по data.operation_id + event (идемпотентно).
  * express.raw — нужен сырой body для HMAC, не распарсенный JSON.
  */
@@ -310,13 +348,18 @@ app.post(
   "/api/webhooks",
   express.raw({ type: "application/json", limit: "32kb" }),
   (req, res) => {
-    if (!AW_WEBHOOK_SECRET) {
+    if (!AW_API_SECRET) {
       return res.status(503).json({ error: "WEBHOOK_NOT_CONFIGURED" });
     }
     const timestamp = req.get("x-sdk-webhook-timestamp");
     const signature = req.get("x-sdk-webhook-signature");
     if (
-      !verifyWebhookSignature(req.body, timestamp, signature, AW_WEBHOOK_SECRET)
+      !verifyWebhookSignature(
+        req.body,
+        timestamp,
+        signature,
+        AW_API_SECRET,
+      )
     ) {
       return res.status(401).json({ error: "INVALID_WEBHOOK_SIGNATURE" });
     }

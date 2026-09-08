@@ -3,7 +3,8 @@
  * Сценарий: покупка (pay) и возврат (receive).
  *
  * Заказ в проде — на вашем бэкенде. В демо статус только в UI.
- * Скоупы заданы в этом файле.
+ * receive исполняется сразу, без листа в кошельке.
+ * Скоупы заданы в этом файле (`userData`, `pay`). `receive` — тип интента, не scope.
  */
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
 import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
@@ -14,7 +15,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData', 'pay', 'receive'] as const;
+const SCOPES = ['userData', 'pay'] as const;
 const ITEM_AMOUNT = '9.00';
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';
@@ -93,7 +94,10 @@ async function verifyIdentity(idToken: string) {
   trustedUserId.value = data.userId;
 }
 
-async function createIntent(type: 'pay' | 'receive', amount: string): Promise<string> {
+async function createIntent(
+  type: 'pay' | 'receive',
+  amount: string,
+): Promise<{ operationId: string; status: string | null; failureReason: string | null }> {
   const idToken = currentIdToken();
   if (!idToken) throw new Error('Нет idToken — нельзя создать интент');
   const response = await fetch('/api/intents', {
@@ -113,7 +117,10 @@ async function createIntent(type: 'pay' | 'receive', amount: string): Promise<st
   }
   const operationId = readOperationId(parsed);
   if (!operationId) throw new Error(`В ответе нет operationId: ${text}`);
-  return operationId;
+  const status = typeof parsed.status === 'string' ? parsed.status : null;
+  const failureReason =
+    typeof parsed.failureReason === 'string' ? parsed.failureReason : null;
+  return { operationId, status, failureReason };
 }
 
 async function buy() {
@@ -125,8 +132,20 @@ async function buy() {
   busy.value = true;
   message.value = 'Создаём pay-интент…';
   try {
-    const operationId = await createIntent('pay', ITEM_AMOUNT);
+    const { operationId, status: intentStatus, failureReason } = await createIntent(
+      'pay',
+      ITEM_AMOUNT,
+    );
     orderStatus.value = 'unpaid';
+    if (intentStatus === 'failed') {
+      message.value = `Оплата: ${failureReason ?? 'failed'}`;
+      return;
+    }
+    if (intentStatus === 'approved') {
+      orderStatus.value = 'paid';
+      message.value = 'Оплачено. Можно вернуть.';
+      return;
+    }
     message.value = 'Подтвердите оплату в кошельке…';
     const result = await instance.operations.requestConfirmation(operationId);
     if (result.status !== 'confirmed') {
@@ -143,16 +162,13 @@ async function buy() {
 }
 
 async function refund() {
-  const instance = sdk.value;
-  if (!instance || !currentIdToken()) return;
+  if (!currentIdToken()) return;
   busy.value = true;
   message.value = 'Создаём receive-интент…';
   try {
-    const operationId = await createIntent('receive', ITEM_AMOUNT);
-    message.value = 'Подтвердите возврат в кошельке…';
-    const result = await instance.operations.requestConfirmation(operationId);
-    if (result.status !== 'confirmed') {
-      message.value = `Возврат: ${result.status}`;
+    const { status, failureReason } = await createIntent('receive', ITEM_AMOUNT);
+    if (status !== 'approved') {
+      message.value = `Возврат: ${failureReason ?? status ?? 'failed'}`;
       return;
     }
     orderStatus.value = 'refunded';

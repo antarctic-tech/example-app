@@ -9,9 +9,8 @@
 # Запуск (секреты только в env, не в образ; .env в образ не копируется):
 #   docker run --rm -p 8080:8080 \
 #     -e AW_API_BASE=https://… \
-#     -e AW_API_KEY=ak_… \
+#     -e AW_APP_ID=ваш-app-id \
 #     -e AW_API_SECRET=… \
-#     -e AW_WEBHOOK_SECRET=… \
 #     mini-app
 # App URL в AW: http://127.0.0.1:8080 (не localhost). HTTPS-кошелёк → TLS спереди.
 #

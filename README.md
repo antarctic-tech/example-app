@@ -27,7 +27,7 @@ Antarctic Wallet как **mini app**: пользователь открывае�
 ```
 Кошелёк (AW)          Mini app (браузер)         Ваш бэкенд
 ────────────          ──────────────────         ──────────
-iframe + UI           ваш фронт + SDK            секрет, HMAC, сессии
+iframe + UI           ваш фронт + SDK            секрет, сессии
 подтверждение         postMessage с кошельком    вызовы API AW
 ```
 
@@ -46,8 +46,8 @@ iframe + UI           ваш фронт + SDK            секрет, HMAC, с�
 
 | Что                                                               | Куда                                  |
 | ----------------------------------------------------------------- | ------------------------------------- |
-| `appId`                                                           | `public/config.json` → `id` мини-апки |
-| `AW_API_BASE`, `AW_API_KEY`, `AW_API_SECRET`, `AW_WEBHOOK_SECRET` | `.env` **бэкенда**                    |
+| `appId`                                                               | `public/config.json` → `id` мини-апки и `AW_APP_ID` бэкенда |
+| `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET`                           | `.env` **бэкенда** (тем же секретом проверяются вебхуки) |
 
 ---
 
@@ -153,10 +153,11 @@ try {
 
 ## 2. Кто пользователь
 
-`userContext` приходит по `postMessage`. Клиент может подменить `userId` —
-бэкенд этому **не верит** (IDOR).
+SDK после входа отдаёт два разных набора данных:
 
-Доверенная личность — только из подписанного `idToken`:
+- `userContext` — имя, аватар. Это для экрана. Браузер может подменить поля,
+  бэкенд этому **не верит**.
+- `idToken` — подписанный JWT кошелька. Его и шлёте на **свой** сервер.
 
 ```ts
 // фронт, после sdk.ready
@@ -167,9 +168,13 @@ await fetch("/api/auth/session", {
 });
 ```
 
-Ваш сервер проверяет подпись по JWKS хоста AW
-(`${AW_API_BASE}/api/v2/sdk/jwks`), `iss === 'aw'`, и берёт `sub`.
-Это и есть user id, на который вы заводите свою сессию.
+Сервер проверяет, что токен правда от AW (ключи с
+`${AW_API_BASE}/api/v2/sdk/jwks`, издатель `aw`, получатель — ваш `appId`)
+и берёт `sub`. Это id пользователя **в вашем приложении** (строка
+`user_app_login`), не номер аккаунта в AW. На этот ключ заводите сессию.
+
+Если просили scope `userData`, в токене ещё флаги KYC: `hasKyc`,
+`hasKycData`, `kycCountry`. Телефона и email там нет.
 
 Образец: `POST /api/auth/session` в [examples/backend-node](./examples/backend-node).
 
@@ -182,8 +187,9 @@ await fetch("/api/auth/session", {
 ```
 Mini app                    Ваш бэкенд                      AW
    │   idToken + сумма          │                             │
-   │ ─────────────────────────► │  HMAC POST /api/apps/v1/    │
-   │                            │  intents  { type, amount }  │
+   │ ─────────────────────────► │                             │
+   │                            │  POST /api/apps/v1/intents  │
+   │                            │  { type, amount }           │
    │                            │ ──────────────────────────► │
    │         operationId        │                             │
    │ ◄───────────────────────── │                             │
@@ -195,11 +201,11 @@ Mini app                    Ваш бэкенд                      AW
 
 Типы интента:
 
-| `type`    | Смысл                                          |
-| --------- | ---------------------------------------------- |
-| `pay`     | Пользователь платит вам (покупка, донат)       |
-| `receive` | Вы отправляете пользователю (возврат, выплата) |
-| `scopes`  | Дополнительные разрешения                      |
+| `type`    | Смысл                                          | Подтверждение          |
+| --------- | ---------------------------------------------- | ---------------------- |
+| `pay`     | Пользователь платит вам (покупка, донат)       | да, лист в кошельке    |
+| `receive` | Вы отправляете пользователю (возврат, выплата) | нет, сразу в ответе    |
+| `scopes`  | Дополнительные разрешения                      | да, лист в кошельке    |
 
 Мини-пример на фронте (URL `/api/intents` — это **ваш** сервер, не AW):
 
@@ -214,24 +220,27 @@ const result = await sdk.operations.requestConfirmation(operationId);
 // result.status: confirmed | rejected | ...
 ```
 
-Подпись запроса к AW считает только сервер:
+Заголовки к AW ставит только сервер:
 
 ```
-X-Sdk-App-Signature = HMAC-SHA256(
-  api_secret,
-  `${timestamp}.POST./api/apps/v1/intents.${sha256(rawBody)}`
-)
+X-Aw-App-Id: <appId>
+Authorization: Bearer <AW_API_SECRET>
 ```
 
-`user_id` в теле к AW берите из проверенного `idToken` (`sub`), не из
-инпута и не из `userContext`. Как именно это сделать на Node — в доке
-бэкенда. Свой `reference_id` заказа тоже ставьте на сервере.
+В теле к AW поле пользователя — `user_app_login`. Это `sub` из проверенного
+токена, не то, что пришло из браузера. Старое поле `user_id` AW отвергает
+(`422 USER_ID_NOT_ACCEPTED`). Как собрать запрос на Node — в README бэкенда.
 
-После подтверждения в кошельке AW шлёт на ваш `webhook_url` события
-`intent.approved` / `intent.rejected` (HMAC, секрет из кабинета). Статус
-заказа закрывайте вебхуком, не ответом браузера.
+Id заказа (`reference_id`) тоже ставьте на сервере. Для возврата (`receive`)
+он обязателен: иначе повтор запроса может отправить деньги дважды.
 
-Заказ (оплачен / возвращён) храните **у себя**. Кошелёк — рельса, не ваша БД.
+Когда пользователь нажал в кошельке, AW сам пишет на ваш `webhook_url`:
+`intent.approved` или `intent.rejected`. Для автоматического `receive` —
+ещё `payment.succeeded` / `payment.failed`. Подпись тем же `AW_API_SECRET`.
+Статус заказа закрывайте этим вебхуком, не ответом вкладки.
+
+Заказ (оплачен / возвращён) храните **у себя**. Кошелёк только проводит
+деньги, это не ваша база заказов.
 
 ---
 
@@ -247,7 +256,7 @@ X-Sdk-App-Signature = HMAC-SHA256(
   "description": "Полное описание на странице приложения в кошельке.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay", "receive"]
+  "requiredScopes": ["userData", "pay"]
 }
 ```
 
@@ -272,8 +281,8 @@ X-Sdk-App-Signature = HMAC-SHA256(
 ## Правила, которые нельзя нарушать
 
 1. Секрет только в env бэкенда.
-2. На бэкенде пользователь = `sub` из проверенного `idToken`.
-3. Intent создаёт сервер, кошелёк только подтверждает.
+2. На бэкенде пользователь — `sub` из проверенного `idToken`, не имя/аватар из SDK.
+3. Интент создаёт сервер. Для `pay` кошелёк показывает лист; `receive` уже выполнен в ответе.
 
 Пакет SDK: [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 
@@ -306,14 +315,14 @@ X-Sdk-App-Signature = HMAC-SHA256(
 Это удобно для продакшена:
 
 1. фронт отдаётся как статика,
-2. бэкенд отвечает за `idToken`, HMAC и интенты,
+2. бэкенд отвечает за `idToken` и интенты,
 3. браузеру не нужны секреты,
 4. кошелёк открывает один URL.
 
 ### Что важно понять
 
 - `FRAMEWORK` выбирает, какой фронт собрать: `vue`, `react` или `angular`.
-- `AW_API_BASE`, `AW_API_KEY`, `AW_API_SECRET`, `AW_WEBHOOK_SECRET` нужны **только при запуске контейнера**.
+- `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET` нужны **только при запуске контейнера**. Тем же секретом проверяются входящие вебхуки.
 - `appId` берётся из `public/config.json` выбранного примера **во время сборки образа**.
 
 То есть сначала вы настраиваете фронт, потом собираете образ, потом запускаете
@@ -328,9 +337,8 @@ X-Sdk-App-Signature = HMAC-SHA256(
 2. Вставьте ваш `appId` в `public/config.json` выбранного стека.
 3. Подготовьте значения:
    - `AW_API_BASE`
-   - `AW_API_KEY`
+   - `AW_APP_ID`
    - `AW_API_SECRET`
-   - `AW_WEBHOOK_SECRET` (для `intent.approved` / `intent.rejected`)
 
 Пример `public/config.json`:
 
@@ -342,7 +350,7 @@ X-Sdk-App-Signature = HMAC-SHA256(
   "description": "Полное описание на странице приложения в кошельке.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay", "receive"]
+  "requiredScopes": ["userData", "pay"]
 }
 ```
 
@@ -378,9 +386,8 @@ docker build --build-arg FRAMEWORK=angular -t mini-app:angular .
 ```bash
 docker run --rm -p 8080:8080 \
   -e AW_API_BASE=https://… \
-  -e AW_API_KEY=ak_… \
+  -e AW_APP_ID=ваш-app-id \
   -e AW_API_SECRET=… \
-  -e AW_WEBHOOK_SECRET=… \
   -e PORT=8080 \
   mini-app:vue
 ```
@@ -424,7 +431,7 @@ docker run --rm -p 8080:8080 \
 Скорее всего не переданы:
 
 - `AW_API_BASE`
-- `AW_API_KEY`
+- `AW_APP_ID`
 - `AW_API_SECRET`
 
 #### 2. Кошелёк не открывает мини-апку

@@ -167,7 +167,16 @@ export class PayComponent implements OnInit, OnDestroy {
     this.busy = true;
     this.message = 'Создаём pay-интент…';
     try {
-      const operationId = await this.createPayIntent(DONATE_AMOUNT);
+      const { operationId, status: intentStatus, failureReason } =
+        await this.createPayIntent(DONATE_AMOUNT);
+      if (intentStatus === 'failed') {
+        this.message = `Донат: ${failureReason ?? 'failed'}`;
+        return;
+      }
+      if (intentStatus === 'approved') {
+        this.message = 'Донат: approved';
+        return;
+      }
       this.message = 'Подтвердите в кошельке…';
       const result = await instance.operations.requestConfirmation(operationId);
       this.message = `Донат: ${result.status}${result.txId ? ` · ${result.txId}` : ''}`;
@@ -200,7 +209,11 @@ export class PayComponent implements OnInit, OnDestroy {
     this.trustedUserId = data.userId;
   }
 
-  private async createPayIntent(amount: string): Promise<string> {
+  private async createPayIntent(amount: string): Promise<{
+    operationId: string;
+    status: string | null;
+    failureReason: string | null;
+  }> {
     const idToken = this.currentIdToken();
     if (!idToken) throw new Error('Нет idToken — нельзя создать интент');
     const response = await fetch('/api/intents', {
@@ -222,7 +235,10 @@ export class PayComponent implements OnInit, OnDestroy {
     }
     const operationId = readOperationId(parsed);
     if (!operationId) throw new Error(`В ответе нет operationId: ${text}`);
-    return operationId;
+    const status = typeof parsed['status'] === 'string' ? parsed['status'] : null;
+    const failureReason =
+      typeof parsed['failureReason'] === 'string' ? parsed['failureReason'] : null;
+    return { operationId, status, failureReason };
   }
 
   private async prepareSdk() {

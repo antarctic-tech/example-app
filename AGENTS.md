@@ -12,19 +12,19 @@ MUST:
 
 - Mini-app runs in the wallet iframe. Confirmations are native wallet UI, never custom HTML.
 - Frontend: `@antarctic-wallet/aw-sdk` only. Handshake = `new AWSDK(...)`; subscribe; `await sdk.init()`.
-- Identity on the backend = `sub` from a JWKS-verified `idToken` (`iss === 'aw'`).
-- Intents: YOUR server HMAC-signs `POST ${AW_API_BASE}/api/apps/v1/intents`. Browser never sees `api_secret`.
-- After `{ operationId }`, frontend only calls `sdk.operations.requestConfirmation(operationId)`.
-- `user_id` in the AW body comes from verified JWT `sub` (positive integer), never from request body / `userContext`.
-- Secrets: `AW_API_BASE`, `AW_API_KEY`, `AW_API_SECRET`, `AW_WEBHOOK_SECRET` only in backend `.env`.
-- `appId` → mini-app `public/config.json` field `id`.
+- Identity on the backend = `sub` from a JWKS-verified `idToken` (`iss === 'aw'`, `aud === appId`). `sub` is opaque per-app `user_app_login` (16 hex), not a global numeric user id. With scope `userData` the token also carries `hasKyc`, `hasKycData`, `kycCountry`.
+- Intents: YOUR server POSTs `${AW_API_BASE}/api/apps/v1/intents` with `X-Aw-App-Id` and `Authorization: Bearer`. Browser never sees `api_secret`.
+- After `{ operationId, status }` for `pay` / `scopes`, frontend only calls `sdk.operations.requestConfirmation(operationId)`. `receive` is executed immediately; do not confirm it in the wallet.
+- `user_app_login` in the AW body comes from verified JWT `sub`, never from request body / `userContext`. Sending `user_id` to AW returns `422 USER_ID_NOT_ACCEPTED`.
+- Secrets: `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET` only in backend `.env`. Webhooks are HMAC-signed with the same `app_secret`.
+- `appId` → mini-app `public/config.json` field `id` and backend `AW_APP_ID` (same value).
 - Subscribe to SDK events **before** `init()`. Call `sdk.destroy()` on unmount.
 - Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`).
 - Vue: store the SDK instance in `shallowRef`. React: `useRef`. Angular: a class field. Never put the SDK class into reactive/deep state.
 
 MUST NOT:
 
-- Put `api_secret` / `AW_API_KEY` / HMAC signing in the browser.
+- Put `api_secret` / `AW_API_SECRET` / Bearer credentials in the browser.
 - Trust `userContext` / client `userId` for auth or payments (IDOR via postMessage).
 - Call AW `POST /api/apps/v1/intents` from the frontend.
 - Invent AW routes (`/api/donate`, `/api/orders`, `/api/refund`, `sdk.operations.prepare()`, etc.).
@@ -34,8 +34,9 @@ AW surface you may use (closed set):
 
 - SDK in iframe: `init`, session, scopes, `requestConfirmation`
 - JWKS: `GET ${AW_API_BASE}/api/v2/sdk/jwks`
-- B2B: HMAC `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
-- Webhook: signed `intent.approved` / `intent.rejected` to YOUR `webhook_url`
+- B2B: Bearer `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
+- B2B poll: `GET ${AW_API_BASE}/api/apps/v1/intents/:operationId_or_referenceId`
+- Webhook: signed `intent.approved` / `intent.rejected` / `payment.succeeded` / `payment.failed` to YOUR `webhook_url` (HMAC with `app_secret`)
 
 Partner domain (orders, catalog, your session cookies) lives on YOUR backend, not on AW.
 
@@ -55,10 +56,10 @@ Copy **one** scenario file into your app — not Home or the router shell.
 |------|-----|-------|---------|--------|
 | Sign-in only | `vue/src/scenarios/Auth.vue` | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData` |
 | Sign-in + pay/donate | `…/Pay.vue` | `…/Pay.tsx` | `…/pay.component.ts` | `userData`, `pay` |
-| Pay + refund | `…/PayRefund.vue` | `…/PayRefund.tsx` | `…/pay-refund.component.ts` | `userData`, `pay`, `receive` |
+| Pay + refund | `…/PayRefund.vue` | `…/PayRefund.tsx` | `…/pay-refund.component.ts` | `userData`, `pay` |
 | Backend (always) | `examples/backend-node/server.mjs` | same | same | — |
 
-`appId` → that project's `public/config.json` field `id`.
+`appId` → that project's `public/config.json` field `id` and backend `AW_APP_ID`.
 Scopes are **constants inside each scenario file**, not from `config.requiredScopes`.
 Each scenario: own `AWSDK` (Vue: `shallowRef`; React: `useRef`; Angular: class field); subscribe before `init()`; `init()` on login button in the example (callable on mount in prod iframe); `destroy()` on unmount.
 Router: hash (`#/auth`) so `?parentOrigin=` is preserved.
@@ -69,14 +70,14 @@ Local mini-app App URL in AW settings: `https://127.0.0.1:<front-port>` (not `lo
 
 ```
 Wallet (AW)              Mini-app (browser)           YOUR backend
-iframe + native UI       front + aw-sdk               env secrets, HMAC, sessions
+iframe + native UI       front + aw-sdk               env secrets, sessions
 confirms operations      postMessage to parentOrigin  JWKS verify + POST intents
 ```
 
 1. Wallet loads the mini-app in an iframe (`?parentOrigin=`).
 2. Front: `fetch('./config.json')` → `new AWSDK({ appId: config.id, scopes: [...SCOPES], parentOrigin, persistSession: true })`. `SCOPES` is the constant in the scenario file, not `config.requiredScopes`.
 3. Events, then `init()`. On `sdk.ready`: show `userContext` in UI; POST `sdk.idToken` to YOUR `/api/auth/session`.
-4. Pay: POST YOUR `/api/intents` `{ idToken, type, amount }` → `{ operationId }` → `requestConfirmation`.
+4. Pay: POST YOUR `/api/intents` `{ idToken, type, amount }` → `{ operationId, status }`. If `status` is `pending`, call `requestConfirmation`. `receive` comes back already `approved`/`failed`.
 5. `parentOrigin` resolution: `?parentOrigin=` → else `document.referrer` origin if in iframe → else `https://localhost:3310`.
 
 ## Contracts
@@ -89,7 +90,7 @@ confirms operations      postMessage to parentOrigin  JWKS verify + POST intents
 { "idToken": "<sdk.idToken>" }
 ```
 
-→ `{ "ok": true, "userId": "<sub>", "tgId": <number|null>, "expiresAt": <exp> }`
+→ `{ "ok": true, "userId": "<sub>", "userAppLogin": "<sub>", "hasKyc": <bool|null>, "hasKycData": <bool|null>, "kycCountry": <string|null>, "expiresAt": <exp> }`
 
 `POST /api/intents`
 
@@ -99,9 +100,9 @@ confirms operations      postMessage to parentOrigin  JWKS verify + POST intents
 
 - `amount` required for `pay` / `receive`
 - `scopes` required for `type: "scopes"`
-- Ignore any `apiKey` / `apiSecret` / `user_id` / `telegramUserId` / `referenceId` from the client
+- Ignore any `apiKey` / `apiSecret` / `user_id` / `user_app_login` / `telegramUserId` / `referenceId` from the client
 
-→ `{ "operationId": "<string>" }`
+→ `{ "operationId": "<string>", "status": "pending|approved|failed", "failureReason": "<string>" }`
 
 `GET /health` → `{ "ok": true }`
 
@@ -112,19 +113,19 @@ Reference: `examples/backend-node/server.mjs`
 ```
 POST ${AW_API_BASE}/api/apps/v1/intents
 Content-Type: application/json
-X-Sdk-App-Key: $AW_API_KEY
-X-Sdk-App-Timestamp: <unix seconds>
-X-Sdk-App-Signature: hex(HMAC-SHA256(api_secret, `${ts}.POST./api/apps/v1/intents.${sha256(rawBody)}`))
+X-Aw-App-Id: $AW_APP_ID
+Authorization: Bearer $AW_API_SECRET
 
-{ "user_id": <from sub>, "type": "pay|receive|scopes", "data": { "amount": "5.00" }, "reference_id": "order-1" }
+{ "user_app_login": "<from sub>", "type": "pay|receive|scopes", "data": { "amount": "5.00" }, "reference_id": "order-1" }
 ```
 
 `type: "scopes"` → `data: { "scopes": [...] }` instead of amount.
-`reference_id` is YOUR order id (set on the server; 409 `REFERENCE_ID_CONFLICT` if reused). Clock drift > 5 min → AW `401 STALE_REQUEST`.
+Never send `user_id` (422 `USER_ID_NOT_ACCEPTED`).
+`reference_id` is YOUR order id (set on the server). Required for `receive`. 409 `REFERENCE_ID_CONFLICT` if reused with different data.
+`receive` executes immediately; response `status` is already `approved` or `failed`.
 Normalize `operationId` from `data.operationId` / `data.operation_id` / `operationId` / `operation_id`.
 
-JWT: `jose.jwtVerify(idToken, createRemoteJWKSet(${AW_API_BASE}/api/v2/sdk/jwks), { issuer: 'aw' })`.
-Production: also pass `audience: appId`.
+JWT: `jose.jwtVerify(idToken, createRemoteJWKSet(${AW_API_BASE}/api/v2/sdk/jwks), { issuer: 'aw', audience: appId })`.
 
 ### AW → YOUR backend (webhook)
 
@@ -133,10 +134,10 @@ Set `webhook_url` on the SdkApp (admin dashboard). Not browser-facing.
 ```
 POST /api/webhooks
 X-Sdk-Webhook-Timestamp: <unix seconds>
-X-Sdk-Webhook-Signature: hex(HMAC-SHA256(webhook_secret, `${ts}.${sha256(rawBody)}`))
+X-Sdk-Webhook-Signature: hex(HMAC-SHA256(AW_API_SECRET, `${ts}.${sha256(rawBody)}`))
 ```
 
-Events: `intent.approved` (pay/receive after transfer succeeded), `intent.rejected`.
+Events: `intent.approved` / `intent.rejected` (wallet confirm), `payment.succeeded` / `payment.failed` (auto `receive`). Payload identity field is `user_app_login`.
 Reject if drift > 5 min or signature mismatch. Dedupe on `data.operation_id` + `event`.
 
 ### SDK (frontend)
@@ -165,7 +166,7 @@ Scope sets:
 
 - auth: `["userData"]`
 - pay: `["userData", "pay"]`
-- refund: `["userData", "pay", "receive"]`
+- refund: `["userData", "pay"]` (`receive` is an intent type, not a grantable scope)
 
 Ask only what the scenario needs.
 

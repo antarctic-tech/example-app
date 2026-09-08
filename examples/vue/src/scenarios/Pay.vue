@@ -85,7 +85,11 @@ async function verifyIdentity(idToken: string) {
   trustedUserId.value = data.userId;
 }
 
-async function createPayIntent(amount: string): Promise<string> {
+async function createPayIntent(amount: string): Promise<{
+  operationId: string;
+  status: string | null;
+  failureReason: string | null;
+}> {
   const idToken = currentIdToken();
   if (!idToken) throw new Error('Нет idToken — нельзя создать интент');
   const response = await fetch('/api/intents', {
@@ -107,7 +111,10 @@ async function createPayIntent(amount: string): Promise<string> {
   }
   const operationId = readOperationId(parsed);
   if (!operationId) throw new Error(`В ответе нет operationId: ${text}`);
-  return operationId;
+  const status = typeof parsed.status === 'string' ? parsed.status : null;
+  const failureReason =
+    typeof parsed.failureReason === 'string' ? parsed.failureReason : null;
+  return { operationId, status, failureReason };
 }
 
 async function donate() {
@@ -119,7 +126,16 @@ async function donate() {
   busy.value = true;
   message.value = 'Создаём pay-интент…';
   try {
-    const operationId = await createPayIntent(DONATE_AMOUNT);
+    const { operationId, status: intentStatus, failureReason } =
+      await createPayIntent(DONATE_AMOUNT);
+    if (intentStatus === 'failed') {
+      message.value = `Донат: ${failureReason ?? 'failed'}`;
+      return;
+    }
+    if (intentStatus === 'approved') {
+      message.value = 'Донат: approved';
+      return;
+    }
     message.value = 'Подтвердите в кошельке…';
     const result = await instance.operations.requestConfirmation(operationId);
     message.value = `Донат: ${result.status}${result.txId ? ` · ${result.txId}` : ''}`;
