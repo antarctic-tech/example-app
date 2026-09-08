@@ -1,20 +1,20 @@
 {
-  "name": "example-embed-app-angular",
+  "name": "example-embed-app-angular-scenarios",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "ng": "ng",
-    "dev": "ng serve --port 5176",
-    "start": "ng serve --port 5176",
+    "dev": "ng serve --host 127.0.0.1 --port 5186 --ssl",
+    "start": "ng serve --host 127.0.0.1 --port 5186 --ssl",
     "build": "ng build",
-    "preview": "ng serve --port 5176"
+    "preview": "ng serve --host 127.0.0.1 --port 5186 --ssl"
   },
   "dependencies": {
     "@angular/common": "^19.0.0",
     "@angular/compiler": "^19.0.0",
     "@angular/core": "^19.0.0",
     "@angular/platform-browser": "^19.0.0",
-    "@angular/platform-browser-dynamic": "^19.0.0",
+    "@angular/router": "^19.0.0",
     "@antarctic-wallet/aw-sdk": "^0.3.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",

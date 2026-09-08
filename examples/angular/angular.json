@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "example-embed-app-angular": {
+    "example-embed-app-angular-scenarios": {
       "projectType": "application",
       "schematics": {},
       "root": "",
@@ -42,14 +42,17 @@
         "serve": {
           "builder": "@angular/build:dev-server",
           "options": {
-            "port": 5176
+            "port": 5186,
+            "host": "127.0.0.1",
+            "ssl": true,
+            "proxyConfig": "proxy.conf.json"
           },
           "configurations": {
             "development": {
-              "buildTarget": "example-embed-app-angular:build:development"
+              "buildTarget": "example-embed-app-angular-scenarios:build:development"
             },
             "production": {
-              "buildTarget": "example-embed-app-angular:build:production"
+              "buildTarget": "example-embed-app-angular-scenarios:build:production"
             }
           },
           "defaultConfiguration": "development"

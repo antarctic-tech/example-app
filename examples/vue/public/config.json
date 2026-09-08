@@ -1,13 +1,9 @@
 {
-  "id": "dev1",
-  "name": "Example DApp",
-  "shortDescription": "Demo embedded application",
-  "description": "A demo embedded application showcasing the AW SDK capabilities for wallet integration.",
+  "id": "12345678",
+  "name": "MyTest",
+  "shortDescription": "Примеры мини-апки Antarctic Wallet",
+  "description": "Три сценария: вход, донат, покупка и возврат. Скоупы в манифесте — для каталога кошелька; каждый экран запрашивает только своё.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": [
-    "balance",
-    "pay",
-    "receive"
-  ]
+  "requiredScopes": ["userData", "pay", "receive"]
 }

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+examples/backend-node/public/
+.env
+.DS_Store
+Thumbs.db

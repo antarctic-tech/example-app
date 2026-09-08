@@ -1,268 +1,449 @@
-# Example Embed App — AW SDK
+# Мини-приложения Antarctic Wallet
 
-Reference integrations for embed mini-apps that run inside [Antarctic Wallet] via [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk), plus a Node.js reference backend that signs B2B intent requests.
+У вас уже есть приложение. Этот репозиторий показывает, как встроить его в
+Antarctic Wallet как **mini app**: пользователь открывает кошелёк, видит ваше
+приложение внутри, входит и (если нужно) платит. Подтверждение всегда в
+нативном UI кошелька, не в вашей вёрстке.
 
-Three framework parity ports — **React 19 / Vue 3 / Angular 19** — that render the exact same UI and exercise the same SDK surface. Pick whichever stack you use in production, read a single file top-to-bottom, and copy the pieces you need.
+| Стек    | Пример                                             |
+| ------- | -------------------------------------------------- |
+| Vue     | [examples/vue](./examples/vue)         |
+| React   | [examples/react](./examples/react)     |
+| Angular | [examples/angular](./examples/angular) |
+| Бэкенд  | [examples/backend-node](./examples/backend-node)   |
 
-## How it works
+Откройте папку своего стека — там README со сценариями и запуском.
+Локально без Docker: [Локальный запуск](#локальный-запуск-без-docker).
+Контейнер: [Развёртывание через Dockerfile](#развёртывание-через-dockerfile).
+Шаги ниже общие и не зависят от фреймворка.
+Для агентов и ИИ-инструментов: [AGENTS.md](./AGENTS.md).
+
+---
+
+## Как это устроено
+
+Три стороны. Их нельзя смешивать.
 
 ```
-┌──────────────────────────┐                    ┌──────────────────────────┐
-│  Antarctic Wallet (host) │ ◀── postMessage ──▶│  Embed app (this repo)   │
-│  — session, signing, UI  │                    │  — your dApp inside      │
-│  — user confirmations    │                    │    the wallet's iframe   │
-└──────────────────────────┘                    └────────────┬─────────────┘
-                                                             │
-                                                             ▼ HTTP
-                                              ┌──────────────────────────┐
-                                              │  Your backend            │
-                                              │  — holds api_secret      │
-                                              │  — signs B2B requests    │
-                                              │     to AW `/api/apps/v1` │
-                                              └──────────────────────────┘
+Кошелёк (AW)          Mini app (браузер)         Ваш бэкенд
+────────────          ──────────────────         ──────────
+iframe + UI           ваш фронт + SDK            секрет, HMAC, сессии
+подтверждение         postMessage с кошельком    вызовы API AW
 ```
 
-The wallet renders your app inside an `<iframe>` and passes its own origin via a query parameter. The embed app creates an `AWSDK` instance, which opens a typed `postMessage` channel, performs a handshake (`init`), and exposes session/scopes helpers. The user confirms operations in the wallet's native UI — never inside the iframe.
+1. Кошелёк открывает ваш фронт в iframe.
+2. Фронт поднимает [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk)
+   и делает `init`.
+3. Платежи и скоупы на стороне AW создаёт **ваш сервер**
+   (`POST /api/apps/v1/intents`). Браузер секрет не видит.
+4. Фронт только просит кошелёк показать лист подтверждения:
+   `sdk.operations.requestConfirmation(operationId)`.
 
-Operation intents (`pay` / `receive` / `scopes`) are created **server-to-server**: your backend holds the `api_secret`, signs each request with HMAC-SHA256, and `POST`s to `https://<aw>/api/apps/v1/intents`. The mini-app only triggers your backend; the secret never reaches the browser.
+Секрет (`api_secret`) живёт только на вашем сервере. Если он оказался во
+фронте — это уже не пример, а дыра.
 
-## Examples
+Куда класть токены из кабинета AW:
 
-| Stack         | Path                                              | Notes                          |
-|---------------|---------------------------------------------------|--------------------------------|
-| React 19      | [`examples/react`](./examples/react)              | Vite                           |
-| Vue 3         | [`examples/vue`](./examples/vue)                  | Vite                           |
-| Angular 19    | [`examples/angular`](./examples/angular)          | Angular CLI (`@angular/build`) |
-| Node backend  | [`examples/backend-node`](./examples/backend-node)| Express, no extra deps         |
+| Что                                                               | Куда                                  |
+| ----------------------------------------------------------------- | ------------------------------------- |
+| `appId`                                                           | `public/config.json` → `id` мини-апки |
+| `AW_API_BASE`, `AW_API_KEY`, `AW_API_SECRET`, `AW_WEBHOOK_SECRET` | `.env` **бэкенда**                    |
 
-All three frontend examples behave identically — same config, same UI, same log output.
+---
 
-## Quick start
+## 1. Подключить SDK
 
-```bash
-# Frontend (pick one)
-cd examples/react      # or examples/vue, examples/angular
-npm install
-npm run dev            # starts the dev server
-
-# Backend (in another terminal)
-cd examples/backend-node
-cp .env.example .env   # fill AW_API_BASE / AW_API_KEY / AW_API_SECRET
-npm install
-npm start
-```
-
-### Production build
-
-```bash
-npm run build          # output → ./dist
-```
-
-## Walkthrough of a single frontend example
-
-Every `App` file is laid out the same way — sections in this order:
-
-1. **Types** — `AppConfig`, `LogEntry`, `AppStatus` (`idle → connecting → ready / error`), `BackendIntentConfig`.
-2. **Helpers**
-   - `getParentOrigin()` — resolves the wallet origin: `?parentOrigin=…` → `document.referrer` → localhost dev-server.
-   - `handleSdkError(e)` — narrows every SDK error class (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`) into a readable log line.
-   - `createBackendIntent(payload)` — POSTs the payload to `/api/intents` of YOUR backend, returns `operationId` + raw upstream response.
-3. **SDK bootstrap** (runs once on mount / init):
-   1. `AWSDK.isInsideWallet()` — detects iframe vs standalone run.
-   2. `fetch('./config.json')` — reads `appId` + `requiredScopes`.
-   3. `new AWSDK({ appId, scopes, parentOrigin, debug, retry, persistSession, timeout })`.
-   4. Subscribes to every SDK event (see [Events](#sdk-events)).
-   5. `await sdk.init()` — handshake with the host.
-4. **App ID prompt** — on first load, the demo asks for the `appId` to use, persists it in `localStorage` (key `aw-demo:appId`), and lets the user override via `?appId=` in the URL. A `Change` button in the header resets it.
-5. **Backend Intent panel** — DEMO UI for the B2B flow. Form fields (`API Base URL`, `API Key`, `API Secret`, `Bearer Token`, `Telegram User ID`) persist in `localStorage` (`aw-demo:backendIntent:v2`). The intent-type selector exposes `pay` / `receive` (with an `Amount` input). Clicking `Send` POSTs everything to `/api/intents` of the demo backend, which signs the HMAC and forwards to AW.
-6. **Pending Intents panel** — once `apiBase` and `bearerToken` are filled in, the panel auto-polls `GET /api/v2/sdk/operations/intents` every 5 seconds and renders the list. Clicking an intent calls `sdk.operations.requestConfirmation(operationId)`, which opens the wallet's native approve/reject sheet.
-7. **Identity panel (OIDC `idToken`)** — `verifyIdentity()` forwards `sdk.idToken` to the demo backend's `POST /api/auth/session`. The backend verifies the JWT signature against the host JWKS and returns the **trusted** `userId` (from the token's `sub`). Runs automatically on `sdk.ready` and via a `Verify identity (backend)` button. See [Authenticating the user](#authenticating-the-user-oidc-idtoken).
-
-## App configuration — `public/config.json`
-
-```json
-{
-  "id": "dev",
-  "name": "Example DApp",
-  "shortDescription": "Demo embedded application",
-  "description": "A demo embedded application showcasing the AW SDK.",
-  "icon": "./icon.svg",
-  "category": "utilities",
-  "requiredScopes": ["userData", "balance", "pay", "receive"]
-}
-```
-
-| Field              | Purpose                                                                                |
-|--------------------|----------------------------------------------------------------------------------------|
-| `id`               | App identifier, passed to the wallet as `appId`. Must match what the wallet has registered. |
-| `name`             | Display name in the wallet UI.                                                         |
-| `shortDescription` | One-line description in app catalogs.                                                  |
-| `description`      | Long description shown on the app's detail page.                                       |
-| `icon`             | Icon path (relative to `public/`). Shown on the app tile.                              |
-| `category`         | Category slug (e.g. `utilities`, `defi`, `games`).                                     |
-| `requiredScopes`   | Scopes requested at init. The user is asked to approve them before the SDK becomes ready. |
-
-## SDK surface used by the examples
-
-### Bootstrap
+Один и тот же код на Vue, React или без фреймворка.
 
 ```ts
+import { AWSDK } from "@antarctic-wallet/aw-sdk";
+
 const sdk = new AWSDK({
-  appId: config.id,
-  scopes: [...config.requiredScopes],
-  parentOrigin: getParentOrigin(),
-  debug: true,              // logs postMessage traffic to the console
-  timeout: 30_000,          // per-request timeout in ms
-  persistSession: true,     // restore the session token from storage on reload
-  retry: { maxAttempts: 3, baseDelay: 1000 },
+  appId: "ваш-app-id",
+  scopes: ["userData"], // что просите у пользователя при входе
+  parentOrigin: parentOrigin, // origin кошелька, см. ниже
+  persistSession: true,
+});
+
+sdk.events.on("sdk.ready", (session) => {
+  // session.userContext — имя, аватар: только для экрана
+  // sdk.idToken — подписанный JWT: его шлёте на СВОЙ бэкенд
 });
 
 await sdk.init();
 ```
 
-### SDK events
+`parentOrigin` нужен, чтобы `postMessage` ходил только в кошелёк:
 
-| Event                  | Fires when                                                             |
-|------------------------|------------------------------------------------------------------------|
-| `sdk.ready`            | Handshake complete. Payload: `AWSession` (token, expiry, scopes, user). |
-| `sdk.error`            | Fatal SDK error (bad origin, host unreachable, init failed).           |
-| `scopes.granted`       | User approved additional scopes.                                       |
-| `session.refreshed`    | Token rotated (auto-refresh or manual `refreshSession()`). Payload carries a fresh `idToken`. |
-| `session.expired`      | Session is no longer valid — re-initialise.                            |
-| `operation.rejected`   | User declined to confirm an operation in the wallet.                   |
+1. `?parentOrigin=...` в URL (кошелёк так и передаёт),
+2. иначе `document.referrer`,
+3. иначе origin вашего dev-кошелька.
 
-### Session
+В `onUnmounted` / `beforeunload` вызовите `sdk.destroy()`.
 
-```ts
-sdk.getSession();      // last known session token + scopes (sync, no postMessage)
-await sdk.status();    // authoritative status from the host
-await sdk.refreshSession();  // force-rotate the token
-```
+### События
 
-### Scopes
+Подписывайтесь **до** `init()`. Для входа хватает первых трёх; `operation.rejected` — если есть платёж.
 
-Scopes are **declared** up-front in `requiredScopes` and confirmed by the user during `sdk.init()`. Additional scopes can be requested later via a B2B intent of type `scopes`.
-
-- `requiredScopes` in `config.json` — what the app asks for.
-- `AWSession.grantedScopes` on `sdk.ready` / `scopes.granted` events — what the user actually granted.
-
-### Error handling
-
-The SDK throws typed errors — handle them explicitly:
-
-| Error class        | When it's thrown                                      |
-|--------------------|-------------------------------------------------------|
-| `AWInitError`      | `sdk.init()` failed (handshake, config, timeout).     |
-| `AWSessionError`   | Session invalid or expired.                           |
-| `AWScopeError`     | Requested scope not granted.                          |
-| `AWOperationError` | Operation-level error — has `operationId` + `errorCode`. |
-| `AWTimeoutError`   | Request exceeded the configured `timeout`.            |
-
-`handleSdkError()` in each example demonstrates the full `instanceof` narrowing pattern.
-
-## Authenticating the user (OIDC `idToken`)
-
-The `userContext` you receive on `sdk.ready` is **UI-only**. It arrives over
-`postMessage`, so a malicious client can swap the `user_id` before it reaches
-your backend — trusting it for auth is an IDOR. Identify the user from a signed
-token instead:
-
-```
-┌──────────┐  idToken   ┌──────────────┐  fetch JWKS   ┌────────┐
-│ Mini-app │ ─────────▶ │ YOUR backend │ ────────────▶ │  AWP   │
-│ frontend │            │ verify sig + │   (public key)│  API   │
-│sdk.idToken            │ trust `sub`  │ ◀──────────── │ /jwks  │
-└──────────┘            └──────────────┘               └────────┘
-```
-
-1. Frontend sends `sdk.idToken` to your backend (`POST /api/auth/session`).
-2. Backend verifies the RS256 signature against `${AW_API_BASE}/api/v2/sdk/jwks`
-   (keys cached + rotated by `kid`), checks `iss === 'aw'`.
-3. The verified `sub` claim is the trusted user id — issue your own session on it.
+| Событие              | Когда                                                           |
+| -------------------- | --------------------------------------------------------------- |
+| `sdk.ready`          | Хендшейк прошёл. Есть сессия, `userContext`, `idToken`.         |
+| `sdk.error`          | SDK сломался: плохой origin, хост недоступен, `init` не удался. |
+| `session.expired`    | Сессия мертва — нужен новый `init`.                             |
+| `session.refreshed`  | Токен обновился, в payload свежий `idToken`.                    |
+| `scopes.granted`     | Пользователь выдал дополнительные скоупы.                       |
+| `operation.rejected` | В кошельке нажали «отклонить».                                  |
 
 ```ts
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+sdk.events.on("sdk.ready", (session) => {
+  // session.userContext — только UI; sdk.idToken — на свой бэкенд
+});
+sdk.events.on("sdk.error", ({ code, message }) => {
+  /* показать ошибку, SDK дальше не работает */
+});
+sdk.events.on("session.expired", () => {
+  /* сбросить UI, заново sdk.init() */
+});
+sdk.events.on("session.refreshed", ({ idToken }) => {
+  /* если держали idToken — взять новый */
+});
+sdk.events.on("scopes.granted", ({ scopes }) => {
+  /* пользователь выдал ещё скоупы */
+});
+sdk.events.on("operation.rejected", ({ operationId, reason }) => {
+  /* отмена в кошельке, не путать с AWOperationError */
+});
 
-const jwks = createRemoteJWKSet(new URL(`${AW_API_BASE}/api/v2/sdk/jwks`));
-const { payload } = await jwtVerify(idToken, jwks, { issuer: 'aw' });
-const userId = payload.sub; // trusted — forging it breaks the signature
+await sdk.init(); // подписки уже стоят
 ```
 
-Runnable reference: [`examples/backend-node/server.mjs`](./examples/backend-node/server.mjs)
-(`POST /api/auth/session`). `idToken` may be `null` while the session is pending —
-null-check before forwarding.
+### Ошибки SDK
 
-## Backend B2B flow
+`init` и `requestConfirmation` бросают классы. Ловите их через `instanceof`, не только `error.message`.
 
-> **Why this changed.** Earlier the mini-app frontend called
-> `sdk.operations.prepare()`, which routed the intent through the wallet's
-> session token. Anyone able to observe the iframe traffic could replay the
-> request. The intent endpoint is now **server-to-server only** and the
-> frontend never sees it. The mini-app SDK only handles the user-confirmation
-> step.
+| Класс              | Когда                                               |
+| ------------------ | --------------------------------------------------- |
+| `AWInitError`      | Не удался `init` (хендшейк, конфиг, таймаут).       |
+| `AWSessionError`   | Сессия недействительна или истекла.                 |
+| `AWScopeError`     | Нужный скоуп не выдан.                              |
+| `AWOperationError` | Ошибка операции — есть `operationId` и `errorCode`. |
+| `AWTimeoutError`   | Запрос дольше, чем `timeout` в конфиге SDK.         |
 
-The flow is three parties:
+```ts
+import {
+  AWInitError,
+  AWOperationError,
+  AWTimeoutError,
+} from "@antarctic-wallet/aw-sdk";
 
-```
-┌─────────┐     1. ask for intent      ┌──────────────┐  2. signed POST  ┌───────┐
-│ Mini-app│  ─────────────────────────▶│ YOUR backend │ ───────────────▶ │  AWP  │
-│ frontend│                            │              │  /api/apps/v1/   │  API  │
-│         │ ◀─── 3. { operationId } ── │  HMAC sign   │      intents     │       │
-└─────────┘                            └──────────────┘                  └───────┘
-     │
-     │ 4. sdk.operations.requestConfirmation(operationId)
-     ▼
-┌──────────┐
-│  Wallet  │  shows native confirm UI → user approves → result returned to SDK
-└──────────┘
-```
-
-### 1) Your backend — sign and create the intent
-
-```http
-POST /api/apps/v1/intents
-Content-Type: application/json
-X-Sdk-App-Key:       ak_…
-X-Sdk-App-Timestamp: 1777331579
-X-Sdk-App-Signature: <hmac-sha256-hex>
-
-{
-  "telegram_user_id": 999888777,
-  "type": "pay",                         // 'pay' | 'receive'
-  "data": { "amount": "50.00" }
+try {
+  await sdk.init();
+} catch (error) {
+  if (error instanceof AWInitError) {
+    /* показать «не удалось войти» */
+  } else if (error instanceof AWTimeoutError) {
+    /* сеть / кошелёк не ответил */
+  } else if (error instanceof AWOperationError) {
+    /* error.operationId, error.errorCode */
+  } else throw error;
 }
 ```
 
-```
-signed     = `${timestamp}.POST./api/apps/v1/intents.${sha256(rawBody)}`
-signature  = HMAC_SHA256(api_secret, signed) // hex
-```
+---
 
-Drift > 5 minutes returns `STALE_REQUEST` (401). `api_key` / `api_secret` are issued per mini-app and **must never ship to the browser**.
+## 2. Кто пользователь
 
-Two reference implementations are shipped:
+`userContext` приходит по `postMessage`. Клиент может подменить `userId` —
+бэкенд этому **не верит** (IDOR).
 
-- [`examples/backend-node/server.mjs`](./examples/backend-node/server.mjs) — runnable Express service. The demo deploy hosts it at `POST /api/intents`, accepts `apiBase / apiKey / apiSecret` in the request body (DEMO ONLY) and forwards to AWP.
-- `examples/{react,vue,angular}/src/integrator-backend.ts` — the same signing logic as a single-file TypeScript snippet you can copy into your own server-side handler.
-
-### 2) Mini-app frontend — confirm the intent
+Доверенная личность — только из подписанного `idToken`:
 
 ```ts
-// `operationId` came from your backend in step 1.
-const result = await sdk.operations.requestConfirmation(operationId);
-// result.status === 'confirmed' | 'rejected' | ...
-// result.txId   (for on-chain operations)
+// фронт, после sdk.ready
+await fetch("/api/auth/session", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ idToken: sdk.idToken }),
+});
 ```
 
-### Demo shortcut
+Ваш сервер проверяет подпись по JWKS хоста AW
+(`${AW_API_BASE}/api/v2/sdk/jwks`), `iss === 'aw'`, и берёт `sub`.
+Это и есть user id, на который вы заводите свою сессию.
 
-The deployed demo backend accepts `apiKey` / `apiSecret` from the request body so integrators can experiment without setting them in env, and tags the response with `X-Demo-Warning`. **Never do this in real apps** — your secret stays only on your server.
+Образец: `POST /api/auth/session` в [examples/backend-node](./examples/backend-node).
 
-## Dependencies
+---
 
-| Stack          | Runtime deps                                                      | Dev deps                                            |
-|----------------|-------------------------------------------------------------------|-----------------------------------------------------|
-| React          | `react`, `react-dom`, `@antarctic-wallet/aw-sdk`                  | `vite`, `@vitejs/plugin-react`, `typescript`        |
-| Vue            | `vue`, `@antarctic-wallet/aw-sdk`                                 | `vite`, `@vitejs/plugin-vue`, `sass`, `typescript`  |
-| Angular        | `@angular/*`, `rxjs`, `zone.js`, `@antarctic-wallet/aw-sdk`       | `@angular/build`, `@angular/cli`, `typescript`      |
-| Node backend   | `express`                                                         | —                                                   |
+## 3. Платёж
+
+Фронт **не** ходит в AW за созданием платежа. Он просит ваш сервер.
+
+```
+Mini app                    Ваш бэкенд                      AW
+   │   idToken + сумма          │                             │
+   │ ─────────────────────────► │  HMAC POST /api/apps/v1/    │
+   │                            │  intents  { type, amount }  │
+   │                            │ ──────────────────────────► │
+   │         operationId        │                             │
+   │ ◄───────────────────────── │                             │
+   │
+   │  sdk.operations.requestConfirmation(operationId)
+   ▼
+Кошелёк: пользователь жмёт «подтвердить» или «отклонить»
+```
+
+Типы интента:
+
+| `type`    | Смысл                                          |
+| --------- | ---------------------------------------------- |
+| `pay`     | Пользователь платит вам (покупка, донат)       |
+| `receive` | Вы отправляете пользователю (возврат, выплата) |
+| `scopes`  | Дополнительные разрешения                      |
+
+Мини-пример на фронте (URL `/api/intents` — это **ваш** сервер, не AW):
+
+```ts
+const res = await fetch("/api/intents", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ idToken: sdk.idToken, type: "pay", amount: "5.00" }),
+});
+const { operationId } = await res.json();
+const result = await sdk.operations.requestConfirmation(operationId);
+// result.status: confirmed | rejected | ...
+```
+
+Подпись запроса к AW считает только сервер:
+
+```
+X-Sdk-App-Signature = HMAC-SHA256(
+  api_secret,
+  `${timestamp}.POST./api/apps/v1/intents.${sha256(rawBody)}`
+)
+```
+
+`user_id` в теле к AW берите из проверенного `idToken` (`sub`), не из
+инпута и не из `userContext`. Как именно это сделать на Node — в доке
+бэкенда. Свой `reference_id` заказа тоже ставьте на сервере.
+
+После подтверждения в кошельке AW шлёт на ваш `webhook_url` события
+`intent.approved` / `intent.rejected` (HMAC, секрет из кабинета). Статус
+заказа закрывайте вебхуком, не ответом браузера.
+
+Заказ (оплачен / возвращён) храните **у себя**. Кошелёк — рельса, не ваша БД.
+
+---
+
+## Конфиг мини-апки
+
+`public/config.json` (имена полей те же в любом стеке):
+
+```json
+{
+  "id": "ваш-app-id",
+  "name": "Моя мини-апка",
+  "shortDescription": "Коротко, одной строкой — для каталога",
+  "description": "Полное описание на странице приложения в кошельке.",
+  "icon": "./icon.svg",
+  "category": "utilities",
+  "requiredScopes": ["userData", "pay", "receive"]
+}
+```
+
+Для хендшейка SDK нужны `id` и скоупы. `id` берётся из этого файла; скоупы SDK —
+константа в файле сценария, не `requiredScopes`. Остальные поля читает каталог кошелька.
+
+| Поле               | Обязательно | Зачем                                                                                          |
+| ------------------ | ----------- | ---------------------------------------------------------------------------------------------- |
+| `id`               | да          | `appId` из кабинета AW. Передаётся в `new AWSDK({ appId })`                                    |
+| `name`             | для каталога | Название в UI кошелька                                                                        |
+| `shortDescription` | для каталога | Одна строка в списке приложений                                                               |
+| `description`      | для каталога | Длинный текст на карточке приложения                                                          |
+| `icon`             | для каталога | Иконка, путь относительно `public/` (например `./icon.svg`)                                   |
+| `category`         | для каталога | Слаг категории: `utilities`, `defi`, `games` и т.п.                                           |
+| `requiredScopes`   | да*         | Манифест для каталога кошелька. Не передаётся в `new AWSDK({ scopes })`                       |
+
+\*В стартерах `examples/vue` / `examples/react` / `examples/angular` скоупы заданы
+константой в файле сценария. Поле `requiredScopes` всё равно держите: его читает каталог.
+
+---
+
+## Правила, которые нельзя нарушать
+
+1. Секрет только в env бэкенда.
+2. На бэкенде пользователь = `sub` из проверенного `idToken`.
+3. Intent создаёт сервер, кошелёк только подтверждает.
+
+Пакет SDK: [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
+
+---
+
+## Локальный запуск (без Docker)
+
+Два процесса: бэкенд и dev-сервер фронта. Подробности стека — в README папки
+примера (`vue` / `react` / `angular`).
+
+1. Бэкенд: `examples/backend-node` → `cp .env.example .env` → указываем ключи полученные от AW → `npm start`.
+   Слушает `http://127.0.0.1:3351`. `npm start` подхватывает `.env` через
+   `node --env-file=.env`. Логи — в этом терминале.
+2. Фронт: в папке стека `npm run dev`.
+   HTTPS на `127.0.0.1` (Vue `:5184`, React `:5185`, Angular `:5186`), `/api` проксируется на бэкенд.
+3. В AW, в настройках mini-app, поле **App URL**: `https://127.0.0.1:5184` (или порт своего стека).
+
+Кошелёк **не принимает** `localhost` — в hostname должна быть точка.
+Кошелёк на HTTPS, поэтому мини-апка тоже HTTPS (иначе mixed content в iframe).
+Один раз откройте URL в браузере и примите самоподписанный сертификат.
+
+---
+
+## Развёртывание через Dockerfile
+
+В репозитории есть один универсальный `Dockerfile`.
+Он собирает **фронт выбранного стека** и кладёт его в `public` у
+`examples/backend-node`, чтобы мини-апка и `/api` работали с одного origin.
+
+Это удобно для продакшена:
+
+1. фронт отдаётся как статика,
+2. бэкенд отвечает за `idToken`, HMAC и интенты,
+3. браузеру не нужны секреты,
+4. кошелёк открывает один URL.
+
+### Что важно понять
+
+- `FRAMEWORK` выбирает, какой фронт собрать: `vue`, `react` или `angular`.
+- `AW_API_BASE`, `AW_API_KEY`, `AW_API_SECRET`, `AW_WEBHOOK_SECRET` нужны **только при запуске контейнера**.
+- `appId` берётся из `public/config.json` выбранного примера **во время сборки образа**.
+
+То есть сначала вы настраиваете фронт, потом собираете образ, потом запускаете
+контейнер с env-переменными бэкенда.
+
+### Что подготовить до сборки
+
+1. Выберите стек:
+   - `examples/vue`
+   - `examples/react`
+   - `examples/angular`
+2. Вставьте ваш `appId` в `public/config.json` выбранного стека.
+3. Подготовьте значения:
+   - `AW_API_BASE`
+   - `AW_API_KEY`
+   - `AW_API_SECRET`
+   - `AW_WEBHOOK_SECRET` (для `intent.approved` / `intent.rejected`)
+
+Пример `public/config.json`:
+
+```json
+{
+  "id": "ваш-app-id",
+  "name": "Моя мини-апка",
+  "shortDescription": "Коротко, одной строкой — для каталога",
+  "description": "Полное описание на странице приложения в кошельке.",
+  "icon": "./icon.svg",
+  "category": "utilities",
+  "requiredScopes": ["userData", "pay", "receive"]
+}
+```
+
+### Сборка образа
+
+Сборку запускайте из корня репозитория.
+
+#### Vue
+
+```bash
+docker build --build-arg FRAMEWORK=vue -t mini-app:vue .
+```
+
+#### React
+
+```bash
+docker build --build-arg FRAMEWORK=react -t mini-app:react .
+```
+
+#### Angular
+
+```bash
+docker build --build-arg FRAMEWORK=angular -t mini-app:angular .
+```
+
+Если не хотите запоминать дефолт в `Dockerfile`, просто **всегда передавайте
+`--build-arg FRAMEWORK=...` явно**.
+
+### Запуск контейнера
+
+После сборки запустите контейнер и передайте env-переменные бэкенда:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e AW_API_BASE=https://… \
+  -e AW_API_KEY=ak_… \
+  -e AW_API_SECRET=… \
+  -e AW_WEBHOOK_SECRET=… \
+  -e PORT=8080 \
+  mini-app:vue
+```
+
+### Что будет доступно после запуска
+
+Контейнер слушает HTTP. Для кабинета AW **не** используйте `localhost`
+(hostname без точки кошелёк отбросит).
+
+- фронт: `http://127.0.0.1:8080`
+- healthcheck: `http://127.0.0.1:8080/health`
+- API бэкенда:
+  - `POST /api/auth/session`
+  - `POST /api/intents`
+  - `POST /api/webhooks` (AW → ваш сервер, не браузер)
+
+В AW, в настройках mini-app, **App URL** для локальной проверки: `http://127.0.0.1:8080`.
+Если кошелёк открыт по HTTPS, iframe не загрузит HTTP (mixed content) —
+поставьте TLS перед контейнером (Caddy / nginx / mkcert) и укажите
+`https://127.0.0.1:…` или ваш домен. В проде — обычный HTTPS-домен,
+не loopback.
+
+Логи бэкенда: `docker logs` того контейнера (`[boot]`, `[auth]`, `[intents]`).
+
+### Как проверить, что всё поднялось
+
+1. Откройте `http://127.0.0.1:8080`.
+2. Убедитесь, что загрузилась стартовая страница примеров.
+3. Откройте `http://127.0.0.1:8080/health`:
+
+```json
+{ "ok": true }
+```
+
+4. Проверьте логи контейнера: сервер должен слушать `0.0.0.0:8080`.
+
+### Типичные ошибки
+
+#### 1. Открывается фронт, но платежи не работают
+
+Скорее всего не переданы:
+
+- `AW_API_BASE`
+- `AW_API_KEY`
+- `AW_API_SECRET`
+
+#### 2. Кошелёк не открывает мини-апку
+
+В **App URL** стоит `localhost` (нет точки в hostname) или HTTP при HTTPS-кошельке.
+Для контейнера без TLS используйте хотя бы `http://127.0.0.1:8080`; для iframe
+в HTTPS-кошельке нужен TLS перед контейнером.
+
+#### 3. Собрался не тот фронт
+
+Значит при сборке не был передан `--build-arg FRAMEWORK=...`.
+Пересоберите образ явно:
+
+```bash
+docker build --build-arg FRAMEWORK=react -t mini-app:react .
+```
+
+#### 4. В контейнере нет вашего `appId`
+
+`appId` читается из `public/config.json` **во время сборки**.
+Если вы поменяли `config.json`, нужно **пересобрать образ**, а не только
+перезапустить контейнер.

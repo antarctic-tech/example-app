@@ -1,11 +1,14 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [vue(), basicSsl()],
   server: {
-    port: 5174,
+    host: '127.0.0.1',
+    port: 5184,
     cors: true,
+    proxy: { '/api': 'http://127.0.0.1:3351' },
   },
 });
