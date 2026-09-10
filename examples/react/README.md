@@ -1,6 +1,6 @@
 # Мини-приложение Antarctic Wallet — React
 
-Документация на русском. English: [общий README](../../README.en.md) · [SDK](https://github.com/antarctic-tech/aw-sdk).
+Документация на русском. English: [общий README](../../README.md) · [SDK](https://github.com/antarctic-tech/aw-sdk).
 
 React + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 

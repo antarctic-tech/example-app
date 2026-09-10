@@ -1,108 +1,110 @@
-# Бэкенд мини-апки (Node.js)
+# Mini-app backend (Node.js)
 
-**Русский** · [English](./README.en.md)
+[Русский](./README.ru.md) · **English**
 
-Это **ваш** сервер, не API Antarctic Wallet (AW).
+This is **your** server, not the Antarctic Wallet (AW) API.
 
-Кошелёк даёт три вещи: SDK в iframe, ключи чтобы проверить JWT пользователя
-и API для платежей с вашего сервера. Всё остальное (заказы, каталог, сессии) —
-ваша зона. Файл [`server.mjs`](./server.mjs) — образец. Скопируйте его, не
-выдумывайте роуты платформы вроде `/api/donate`.
+The wallet gives you three things: the SDK inside the iframe, the keys to verify
+the user's JWT, and an API for payments made from your server. Everything else
+(orders, catalogue, sessions) is yours. [`server.mjs`](./server.mjs) is a
+reference implementation. Copy it; do not invent platform routes like
+`/api/donate`.
 
 ```
-Кошелёк (AW)                 Мини-апка (браузер)              Этот сервер
-iframe + нативное подтверждение   фронт + aw-sdk              секреты, сессии
-                              fetch('/api/...')  ──────────►  проверка JWT
-                                                              Bearer POST в AW
+Wallet (AW)                    Mini app (browser)            This server
+iframe + native confirmation   frontend + aw-sdk             secrets, sessions
+                               fetch('/api/...')  ─────────► JWT verification
+                                                             Bearer POST to AW
 ```
 
-Нужен Node 20+.
+Requires Node 20+.
 
 ---
 
-## Быстрый старт
+## Quick start
 
 ```bash
 cp .env.example .env
-# заполните AW_API_BASE / AW_APP_ID / AW_API_SECRET
+# fill in AW_API_BASE / AW_APP_ID / AW_API_SECRET
 npm install
 npm start
 ```
 
-`npm start` = `node --env-file=.env server.mjs`.
-Код `.env` не парсит: его подхватывает Node. В Docker файл не кладут в образ —
-переменные передают через `-e`.
+`npm start` is `node --env-file=.env server.mjs`. The code does not parse `.env`
+itself — Node does. In Docker the file is not baked into the image; the values
+are passed with `-e`.
 
-Проверка: [http://127.0.0.1:3351/health](http://127.0.0.1:3351/health) → `{"ok":true}`.
+Check: [http://127.0.0.1:3351/health](http://127.0.0.1:3351/health) → `{"ok":true}`.
 
-Логи — в этом терминале: `[boot]`, `[auth]`, `[intents]`, `[webhook]`.
-Перезагрузка при правках: `npm run dev`.
+Logs go to that terminal: `[boot]`, `[auth]`, `[intents]`, `[webhook]`.
+Reload on changes: `npm run dev`.
 
-Фронт (`vue` :5184, `react` :5185, `angular` :5186)
-проксирует `/api` сюда. В AW, в настройках mini-app, **App URL** — адрес **фронта**
-(`https://127.0.0.1:5184`), не этот порт.
+The frontend (`vue` :5184, `react` :5185, `angular` :5186) proxies `/api` here.
+In AW, in the mini-app settings, **App URL** is the address of the **frontend**
+(`https://127.0.0.1:5184`), not this port.
 
-Если в логе есть `(static from .../public)` — Express ещё отдаёт собранную
-мини-апку из папки `public/` (так делает Docker). Для локальной разработки
-это не нужно: UI смотрите на Vite/ng, сюда ходят только `/api` и `/health`.
+If the log contains `(static from .../public)`, Express is also serving a built
+mini app from `public/` (that is what Docker does). You do not need it in local
+development: look at the UI on Vite/ng, and let only `/api` and `/health` come
+here.
 
 ---
 
-## Куда класть секреты
+## Where the secrets go
 
-Только в `.env` (локально) или в env процесса (Docker, оркестратор).
-Никогда во фронт и никогда в тело запроса из браузера.
+Only into `.env` (locally) or the process env (Docker, orchestrator). Never into
+the frontend and never into a request body coming from the browser.
 
 ```
-# Origin API без суффикса /api
+# API origin without the /api suffix
 AW_API_BASE=https://api.example.com
-AW_APP_ID=ваш-app-id
+AW_APP_ID=your-app-id
 AW_API_SECRET=…
 PORT=3351
 ALLOWED_ORIGIN=*
-# STATIC_DIR=/path/to/dist  # опционально, отдавать папку для не-API путей
+# STATIC_DIR=/path/to/dist  # optional, serve a folder for non-API paths
 ```
 
-| Переменная          | Зачем                                                                 |
-| ------------------- | --------------------------------------------------------------------- |
-| `AW_API_BASE`       | Origin API AW, **без** `/api` на конце                                |
-| `AW_APP_ID`         | `appId` из кабинета, заголовок `X-Aw-App-Id` (тот же, что в `config.json`) |
-| `AW_API_SECRET`     | Секрет приложения: и для запросов в AW, и для проверки вебхуков. Во фронт не класть — иначе любой сможет создавать платежи от вашего имени |
-| `PORT`              | Порт этого сервера. По умолчанию в примере `3351`                     |
-| `ALLOWED_ORIGIN`    | Значение `Access-Control-Allow-Origin`. В примере `*`; в проде укажите свой origin |
-| `STATIC_DIR`        | Опционально: папка со статикой для не-API путей (так собранную мини-апку отдаёт Docker-образ) |
+| Variable         | Why                                                                   |
+| ---------------- | --------------------------------------------------------------------- |
+| `AW_API_BASE`    | AW API origin, **without** a trailing `/api`                          |
+| `AW_APP_ID`      | The `appId` from the dashboard, sent as `X-Aw-App-Id` (same value as in `config.json`) |
+| `AW_API_SECRET`  | App secret: used both for requests to AW and to verify webhooks. Never ship it to the frontend — anyone could then create payments in your name |
+| `PORT`           | This server's port. `3351` in the example                             |
+| `ALLOWED_ORIGIN` | Value for `Access-Control-Allow-Origin`. `*` in the example; pin it to your origin in production |
+| `STATIC_DIR`     | Optional folder served for non-API paths (this is how the Docker image serves the built mini app) |
 
-Плохо: `https://api.example.com/api` — интент уйдёт на `/api/api/apps/v1/intents`.
-Хорошо: `https://api.example.com`.
+Bad: `https://api.example.com/api` — the intent would go to
+`/api/api/apps/v1/intents`. Good: `https://api.example.com`.
 
 ---
 
-## Что умеет этот сервер
+## What this server does
 
-Три ручки. Браузер ходит только в первые две. Третья — это AW, который
-пишет вам сам, когда платёж завершился.
+Three routes. The browser only ever calls the first two. The third is AW writing
+to you when an operation finishes.
 
 ### `GET /health`
 
-Живой ли процесс. Ответ: `{"ok": true}`. Откройте в браузере, если не уверены,
-что сервер поднялся.
+Is the process alive. Returns `{"ok": true}`. Open it in a browser if you are
+not sure the server came up.
 
-### `POST /api/auth/session` — кто этот пользователь
+### `POST /api/auth/session` — who this user is
 
-После входа SDK даёт фронту `idToken` — подписанный JWT кошелька.
-Фронт присылает его сюда. Сервер проверяет подпись по ключам AW
-(`${AW_API_BASE}/api/v2/sdk/jwks`), что токен выпущен AW (`iss === 'aw'`)
-и предназначен вашему приложению (`aud === appId`).
+After sign-in the SDK hands the frontend an `idToken` — the wallet's signed JWT.
+The frontend posts it here. The server verifies the signature against AW's keys
+(`${AW_API_BASE}/api/v2/sdk/jwks`), that the token was issued by AW
+(`iss === 'aw'`) and that it is meant for your app (`aud === appId`).
 
-Внутри токена поле `sub` — **id пользователя в вашем приложении**. Это
-случайная hex-строка (`user_app_login`), а не номер аккаунта в AW.
-Один и тот же человек в другом мини-приложении получит другой `sub`.
-Если пользователь отзовёт доступ и зайдёт снова — `sub` будет новый.
+Inside the token, `sub` is the **user's id inside your application**. It is a
+random hex string (`user_app_login`), not an AW account number. The same person
+gets a different `sub` in a different mini app. If the user revokes access and
+comes back, the `sub` will be new.
 
-Этот `sub` и есть ключ вашей сессии / записи в БД.
+That `sub` is the key for your session / database record.
 
-Запрос: `{ "idToken": "<sdk.idToken>" }`  
-Ответ:
+Request: `{ "idToken": "<sdk.idToken>" }`
+Response:
 
 ```json
 {
@@ -116,72 +118,75 @@ ALLOWED_ORIGIN=*
 }
 ```
 
-`userId` и `userAppLogin` — одно и то же (`sub`). `hasKyc` / `hasKycData` /
-`kycCountry` приходят, только если приложение просило scope `userData`.
-Телефон, email и глобальный id AW в токене нет.
+`userId` and `userAppLogin` are the same value (`sub`). `hasKyc` / `hasKycData`
+/ `kycCountry` are present only if the app asked for the `userData` scope. There
+is no phone number, email or global AW id in the token.
 
-Имя и аватар из SDK (`userContext`) на бэкенд **нельзя** класть в авторизацию:
-это сообщение из iframe, клиент может подставить чужие поля.
+The name and avatar from the SDK (`userContext`) must **never** be used for
+authentication on the backend: that is a message from an iframe and the client
+can substitute someone else's fields.
 
-### `POST /api/intents` — создать платёж или возврат
+### `POST /api/intents` — create a payment or a refund
 
-Фронт не ходит в AW сам. Он говорит вашему серверу: «создай операцию».
-Сервер ещё раз проверяет JWT, берёт `sub` и уже **с секретом** зовёт AW.
+The frontend does not call AW itself. It tells your server: "create an
+operation". The server verifies the JWT again, takes `sub` and calls AW **with
+the secret**.
 
-| `type`    | Смысл                         | Что передать           | Что дальше |
-| --------- | ----------------------------- | ---------------------- | ---------- |
-| `pay`     | Пользователь платит вам       | `amount`               | Фронт зовёт `requestConfirmation` — лист в кошельке |
-| `receive` | Вы платите пользователю       | `amount`               | Деньги уходят сразу, листа нет, скоуп не нужен. В ответе уже `approved` или `failed` |
-| `scopes`  | Допросить ещё разрешения      | `scopes`: `["pay"]`    | Как у `pay`: лист в кошельке |
+| `type`    | Meaning                        | What to pass         | What happens next |
+| --------- | ------------------------------ | -------------------- | ----------------- |
+| `pay`     | The user pays you              | `amount`             | The frontend calls `requestConfirmation` — a sheet in the wallet |
+| `receive` | You pay the user               | `amount`             | The money leaves immediately, no sheet, no scope required. The response is already `approved` or `failed` |
+| `scopes`  | Ask for more permissions       | `scopes`: `["pay"]`  | Same as `pay`: a sheet in the wallet |
 
-Запрос от фронта (секретов здесь нет):
+Request from the frontend (no secrets here):
 
 ```json
 { "idToken": "<sdk.idToken>", "type": "pay", "amount": "5.00" }
 ```
 
-Ответ для `pay`: `{ "operationId": "…", "status": "pending" }`.  
-Для `receive`: `{ "operationId": "…", "status": "approved" }` или `failed`
-(тогда ещё `failureReason`).
+Response for `pay`: `{ "operationId": "…", "status": "pending" }`.
+For `receive`: `{ "operationId": "…", "status": "approved" }` or `failed`
+(with `failureReason` in that case).
 
-Что клиент прислал как `user_id` / `user_app_login` / `apiSecret` — игнорируйте.
-В AW уходит только `user_app_login` из проверенного токена. Если послать
-старое поле `user_id`, AW ответит `422 USER_ID_NOT_ACCEPTED`.
+Whatever the client sent as `user_id` / `user_app_login` / `apiSecret` —
+ignore it. Only the `user_app_login` from the verified token goes to AW. If you
+send the old `user_id` field, AW answers `422 USER_ID_NOT_ACCEPTED`.
 
-`reference_id` — id заказа **у вас**. Ставьте его на сервере, не из браузера.
-Для `receive` он обязателен: без него повтор запроса (таймаут, ретрай) может
-перевести деньги второй раз. Тот же id и те же данные → AW вернёт старый
-интент. Тот же id, но другая сумма → `409 REFERENCE_ID_CONFLICT`.
+`reference_id` is **your** order id. Set it on the server, never from the
+browser. For `receive` it is mandatory: without it a retried request (timeout,
+retry) can transfer the money a second time. Same id and same data → AW returns
+the existing intent. Same id but a different amount → `409 REFERENCE_ID_CONFLICT`.
 
-### `POST /api/webhooks` — AW сообщает итог
+### `POST /api/webhooks` — AW reports the outcome
 
-Это не браузер. Когда пользователь подтвердил или отклонил операцию
-(или `receive` уже исполнился), AW стучится на URL, который вы указали
-в кабинете (`webhook_url`).
+This is not the browser. When the user has confirmed or rejected the operation
+(or a `receive` has executed), AW posts to the URL you configured in the
+dashboard (`webhook_url`).
 
-Проверьте подпись тем же `AW_API_SECRET`, что и Bearer-запросы.
-Заголовки: `X-Sdk-Webhook-Timestamp`, `X-Sdk-Webhook-Signature`.
-Подпись: HMAC-SHA256 секрета по строке `"{timestamp}.{sha256(сырое тело)}"`.
-Считайте по **сырым байтам**, не по `JSON.parse` — иначе подпись разъедется.
-Если часы сервера и AW расходятся больше чем на 5 минут — отклоните.
+Verify the signature with the same `AW_API_SECRET` you use for Bearer requests.
+Headers: `X-Sdk-Webhook-Timestamp`, `X-Sdk-Webhook-Signature`.
+Signature: HMAC-SHA256 of the secret over the string
+`"{timestamp}.{sha256(raw body)}"`. Compute it over the **raw bytes**, not over
+`JSON.parse` output — otherwise the signature will not match. If your clock and
+AW's differ by more than 5 minutes, reject the request.
 
-События:
+Events:
 
-| Событие | Когда |
-| ------- | ----- |
-| `intent.approved` / `intent.rejected` | Пользователь нажал в кошельке |
-| `payment.succeeded` / `payment.failed` | Автоматический `receive` |
+| Event | When |
+| ----- | ---- |
+| `intent.approved` / `intent.rejected` | The user tapped in the wallet |
+| `payment.succeeded` / `payment.failed` | An automatic `receive` |
 
-В теле — `user_app_login` (тот же `sub`), не глобальный id.
-В проде заказ помечайте **здесь** и не обрабатывайте одно и то же
-`operation_id` + `event` дважды. Ответ фронта после `requestConfirmation`
-для учёта денег не годится: вкладку можно закрыть.
+The body carries `user_app_login` (the same `sub`), not a global id. In
+production, mark the order **here**, and do not process the same
+`operation_id` + `event` twice. What the frontend got back from
+`requestConfirmation` is not good enough for accounting: the tab can be closed.
 
 ---
 
-## Как фронт это вызывает
+## How the frontend calls this
 
-После `sdk.init()`:
+After `sdk.init()`:
 
 ```ts
 await fetch('/api/auth/session', {
@@ -199,12 +204,12 @@ const { operationId } = await fetch('/api/intents', {
 await sdk.operations.requestConfirmation(operationId);
 ```
 
-`/api` на dev-сервере фронта проксируется на этот бэкенд. Секреты в этих
-запросах не участвуют.
+The frontend dev server proxies `/api` to this backend. No secrets take part in
+these requests.
 
 ---
 
-## Этот сервер → AW
+## This server → AW
 
 ```
 POST ${AW_API_BASE}/api/apps/v1/intents
@@ -213,28 +218,32 @@ X-Aw-App-Id:     AW_APP_ID
 Authorization:   Bearer AW_API_SECRET
 ```
 
-Тело (пример `pay`):
+Body (a `pay` example):
 
 ```json
 { "type": "pay", "user_app_login": "a1b2c3d4e5f60718", "data": { "amount": "5.00" } }
 ```
 
-`user_app_login` — это `sub` из JWT, строка. Числовой `user_id` слать нельзя.
-`operationId` в ответе AW бывает в `data.operationId` или `data.operation_id` —
-пример понимает оба. Рядом лежит `status`: `pending`, `approved` или `failed`.
+`user_app_login` is the `sub` from the JWT, as a string. A numeric `user_id`
+must not be sent. In AW's response `operationId` may arrive as
+`data.operationId` or `data.operation_id` — the example understands both. Next
+to it is `status`: `pending`, `approved` or `failed`.
 
-Деньги при `pay` идут с баланса пользователя на баланс вашего приложения
-в AW (того, чей `appId` и секрет в запросе). `receive` — наоборот, сразу,
-без экрана «подтвердить».
+For `pay`, the money moves from the user's balance to the balance of your app
+inside AW (the one whose `appId` and secret are in the request). `receive` is
+the opposite, and happens immediately, with no confirmation screen.
 
 ---
 
-## Правила, которые нельзя нарушать
+## Rules you must not break
 
-1. Секрет (`AW_API_SECRET`) только на сервере, никогда во фронте.
-2. Пользователь — `sub` из проверенного `idToken`. Имя и аватар из SDK не считаются доказательством.
-3. В AW уходит поле `user_app_login` (= `sub`), не `user_id`.
-4. `pay` подтверждает человек в кошельке. `receive` уже выполнен в ответе сервера.
-5. В проде заказ закрывайте вебхуком, не тем, что ответил браузер.
+1. The secret (`AW_API_SECRET`) stays on the server, never in the frontend.
+2. The user is the `sub` from a verified `idToken`. The name and avatar from the
+   SDK prove nothing.
+3. The field sent to AW is `user_app_login` (= `sub`), not `user_id`.
+4. `pay` is confirmed by a human in the wallet. `receive` is already done by the
+   time the server responds.
+5. In production, settle the order from the webhook, not from what the browser
+   reported.
 
-Готовый код: [`server.mjs`](./server.mjs).
+Reference implementation: [`server.mjs`](./server.mjs).

@@ -1,6 +1,6 @@
 # AGENTS.md — Antarctic Wallet mini-app (machine spec)
 
-Human docs: `README.md` (RU) / `README.en.md` (EN). Do not rewrite those files for pedagogy.
+Human docs: `README.ru.md` (RU) / `README.md` (EN). Do not rewrite those files for pedagogy.
 This file is the source of truth for code generation.
 
 Requires `@antarctic-wallet/aw-sdk` **>= 0.4.0**. SDK reference:
