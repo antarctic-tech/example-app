@@ -1,5 +1,7 @@
 # Мини-приложение Antarctic Wallet — Vue
 
+Документация на русском. English: [общий README](../../README.en.md) · [SDK](https://github.com/antarctic-tech/aw-sdk).
+
 Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 
 Один проект, три сценария. Вставьте свой `appId`, запустите — и увидите, как работает
@@ -117,9 +119,9 @@ iframe + нативный UI      ваш фронт + SDK             секре
 ### Фронт
 
 ```ts
-import { AWSDK, AWInitError, AWTimeoutError } from "@antarctic-wallet/aw-sdk";
+import { AWSDK, AWScope, AWInitError, AWTimeoutError } from "@antarctic-wallet/aw-sdk";
 
-const SCOPES = ["userData"]; // в каждом сценарии свой набор
+const SCOPES = [AWScope.USER_DATA]; // в каждом сценарии свой набор
 
 const sdk = shallowRef<AWSDK | null>(null);
 
@@ -198,6 +200,7 @@ function getParentOrigin(): string {
 | `session.expired`    | Сессия истекла — нужен повторный `init()`        |
 | `session.refreshed`  | Токен обновился — свежий `idToken` в payload     |
 | `operation.rejected` | Пользователь отклонил операцию в кошельке        |
+| `backButton`         | Нажата стрелка «Назад» в шапке кошелька           |
 
 ### Ошибки SDK
 
@@ -363,8 +366,9 @@ app.post("/api/intents", express.json(), async (req, res) => {
 - **Вернуть** → `type: 'receive'`. Деньги уходят сразу, листа в кошельке нет.
   Смотрите `status` в ответе сервера (`approved` / `failed`).
 
-`receive` — это тип операции, не отдельный scope. В SDK достаточно
-`userData` и `pay`.
+`receive` — это тип операции, а не скоуп, и он не требует никакого скоупа.
+Кошелёк выдаёт только `userData`, `balance` и `pay`; этот сценарий просит
+`userData` и `pay` ради покупки, а не ради возврата.
 
 ### Фронт
 
@@ -432,3 +436,4 @@ async function refund(amount: string) {
 ---
 
 Пакет SDK: [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk)
+Исходники и документация SDK (EN/RU): [antarctic-tech/aw-sdk](https://github.com/antarctic-tech/aw-sdk).

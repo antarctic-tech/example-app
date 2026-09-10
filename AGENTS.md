@@ -1,7 +1,10 @@
 # AGENTS.md — Antarctic Wallet mini-app (machine spec)
 
-Human docs: `README.md` (RU). Do not rewrite that file for pedagogy.
+Human docs: `README.md` (RU) / `README.en.md` (EN). Do not rewrite those files for pedagogy.
 This file is the source of truth for code generation.
+
+Requires `@antarctic-wallet/aw-sdk` **>= 0.4.0**. SDK reference:
+[antarctic-tech/aw-sdk](https://github.com/antarctic-tech/aw-sdk).
 
 You are implementing a **partner mini-app**, not Antarctic Wallet (AW).
 AW already exists. Copy the example; do not invent platform APIs.
@@ -12,6 +15,7 @@ MUST:
 
 - Mini-app runs in the wallet iframe. Confirmations are native wallet UI, never custom HTML.
 - Frontend: `@antarctic-wallet/aw-sdk` only. Handshake = `new AWSDK(...)`; subscribe; `await sdk.init()`.
+- Grantable scopes are `userData` | `balance` | `pay` — the `AWScope` enum exported by the SDK. Nothing else is grantable. `receive` is an intent type and requires no scope at all.
 - Identity on the backend = `sub` from a JWKS-verified `idToken` (`iss === 'aw'`, `aud === appId`). `sub` is opaque per-app `user_app_login` (16 hex), not a global numeric user id. With scope `userData` the token also carries `hasKyc`, `hasKycData`, `kycCountry`.
 - Intents: YOUR server POSTs `${AW_API_BASE}/api/apps/v1/intents` with `X-Aw-App-Id` and `Authorization: Bearer`. Browser never sees `api_secret`.
 - After `{ operationId, status }` for `pay` / `scopes`, frontend only calls `sdk.operations.requestConfirmation(operationId)`. `receive` is executed immediately; do not confirm it in the wallet.
@@ -27,12 +31,13 @@ MUST NOT:
 - Put `api_secret` / `AW_API_SECRET` / Bearer credentials in the browser.
 - Trust `userContext` / client `userId` for auth or payments (IDOR via postMessage).
 - Call AW `POST /api/apps/v1/intents` from the frontend.
-- Invent AW routes (`/api/donate`, `/api/orders`, `/api/refund`, `sdk.operations.prepare()`, etc.).
+- Invent AW routes (`/api/donate`, `/api/orders`, `/api/refund`, etc.).
+- Call `sdk.operations.prepare()` — removed in SDK 0.4.0. `sdk.operations` exposes `requestConfirmation()` only.
 - Persist order paid/refunded state only in the browser in production (wallet is a rail, not your DB).
 
 AW surface you may use (closed set):
 
-- SDK in iframe: `init`, session, scopes, `requestConfirmation`
+- SDK in iframe: `init`, session, scopes, `requestConfirmation`, `backButton`
 - JWKS: `GET ${AW_API_BASE}/api/v2/sdk/jwks`
 - B2B: Bearer `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
 - B2B poll: `GET ${AW_API_BASE}/api/apps/v1/intents/:operationId_or_referenceId`
@@ -142,7 +147,9 @@ Reject if drift > 5 min or signature mismatch. Dedupe on `data.operation_id` + `
 
 ### SDK (frontend)
 
-Constructor: `{ appId, scopes, parentOrigin, persistSession?: true, debug?: boolean }`
+Constructor: `{ appId, scopes, parentOrigin, persistSession?: true, debug?: boolean, timeout?: 30000, retry?: { maxAttempts: 3, baseDelay: 1000 } }`
+
+`retry` covers handshake / session / scopes. It is never applied to `requestConfirmation` (waits for a human).
 
 Events (subscribe before `init`):
 
@@ -153,9 +160,27 @@ Events (subscribe before `init`):
 | `session.expired` | Clear UI; `sdk.init()` again |
 | `session.refreshed` | Replace stored `idToken` |
 | `scopes.granted` | Update granted scopes |
-| `operation.rejected` | User declined in wallet; not `AWOperationError` |
+| `operation.rejected` | User declined in wallet; also thrown as `AWOperationError` with `errorCode: 'user_rejected'` |
+| `backButton` | Host back arrow pressed; you navigate, the container stays open |
 
 `idToken` may be null while session is pending — do not POST it.
+
+### Back button (optional)
+
+`sdk.backButton.show()` swaps the host's "Close" for a back arrow; `hide()` restores it.
+Pressing it only delivers `backButton` / `onClick` handlers — the host never navigates or
+closes the container. `sdk.destroy()` hides the arrow and drops handlers.
+
+```ts
+sdk.backButton.onClick(() => router.back());
+sdk.backButton.show();
+```
+
+### Outside the wallet
+
+`AWSDK.isInsideWallet()` → `false` when the page is opened as a plain browser tab
+(not an iframe / RN WebView). Render a "open me in Antarctic Wallet" screen instead of
+calling `init()`.
 
 ## `public/config.json`
 
@@ -166,9 +191,9 @@ Scope sets:
 
 - auth: `["userData"]`
 - pay: `["userData", "pay"]`
-- refund: `["userData", "pay"]` (`receive` is an intent type, not a grantable scope)
+- refund: `["userData", "pay"]` — for the purchase; the `receive` intent itself requires no scope
 
-Ask only what the scenario needs.
+`balance` is grantable too, but no example scenario needs it. Ask only what the scenario needs.
 
 ## Implementation checklist
 

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.angular/
 examples/backend-node/public/
 .env
 .DS_Store

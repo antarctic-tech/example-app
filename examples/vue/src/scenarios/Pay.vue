@@ -6,7 +6,7 @@
  * Возврата нет. Скоупы заданы в этом файле.
  */
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
-import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
+import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 interface AppConfig {
@@ -14,7 +14,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData', 'pay'] as const;
+const SCOPES = [AWScope.USER_DATA, AWScope.PAY] as const;
 const DONATE_AMOUNT = '1.00';
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';

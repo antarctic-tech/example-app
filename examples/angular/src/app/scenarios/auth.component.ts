@@ -10,7 +10,7 @@
  */
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
+import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 interface AppConfig {
@@ -18,7 +18,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData'] as const;
+const SCOPES = [AWScope.USER_DATA] as const;
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -84,9 +84,6 @@ function asErrorMessage(error: unknown): string {
             }
             <div>
               <div class="name">{{ user.displayName ?? 'Пользователь' }}</div>
-              @if (user.walletAddress) {
-                <div class="muted">{{ user.walletAddress }}</div>
-              }
             </div>
           </div>
           <p class="hint">

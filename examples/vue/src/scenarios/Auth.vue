@@ -10,7 +10,7 @@
  * Скоупы заданы в этом файле, не в config.json.
  */
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
-import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
+import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 interface AppConfig {
@@ -19,7 +19,7 @@ interface AppConfig {
 }
 
 /** Скоупы этого сценария — только профиль. */
-const SCOPES = ['userData'] as const;
+const SCOPES = [AWScope.USER_DATA] as const;
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -180,7 +180,6 @@ onUnmounted(() => {
         <img v-if="user.avatarUrl" :src="user.avatarUrl" alt="" />
         <div>
           <div class="name">{{ user.displayName ?? 'Пользователь' }}</div>
-          <div v-if="user.walletAddress" class="muted">{{ user.walletAddress }}</div>
         </div>
       </div>
       <p class="hint">

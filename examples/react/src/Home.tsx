@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { AWScope } from '@antarctic-wallet/aw-sdk';
 
 const scenarios = [
-  { title: 'Вход', scopes: 'userData', route: '/auth' },
-  { title: 'Донат', scopes: 'userData, pay', route: '/pay' },
-  { title: 'Покупка и возврат', scopes: 'userData, pay, receive', route: '/pay-refund' },
+  { title: 'Вход', scopes: [AWScope.USER_DATA], route: '/auth' },
+  { title: 'Донат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay' },
+  { title: 'Покупка и возврат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay-refund' },
 ];
 
 export function Home() {
@@ -25,7 +26,7 @@ export function Home() {
         <article key={item.route} className="card">
           <h2>{item.title}</h2>
           <p className="scopes">
-            Скоупы: <code>{item.scopes}</code>
+            Скоупы: <code>{item.scopes.join(', ')}</code>
           </p>
           <Link className="btn" to={item.route}>
             Открыть

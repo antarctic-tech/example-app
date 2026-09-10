@@ -1,13 +1,19 @@
 {
   "name": "example-embed-app",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Antarctic Wallet embed app example",
   "keywords": [
-    "example"
+    "antarctic-wallet",
+    "mini-app",
+    "miniapp",
+    "example",
+    "vue",
+    "react",
+    "angular"
   ],
   "repository": {
     "type": "git",
-    "url": "git@gitlab.awalltest.xyz:antarctic/frontend/example-embed-app.git"
+    "url": "git+https://github.com/antarctic-tech/example-app.git"
   },
   "license": "MIT",
   "author": "Antarctic Tech",
@@ -16,5 +22,10 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
-  }
+  },
+  "homepage": "https://github.com/antarctic-tech/example-app#readme",
+  "bugs": {
+    "url": "https://github.com/antarctic-tech/example-app/issues"
+  },
+  "private": true
 }

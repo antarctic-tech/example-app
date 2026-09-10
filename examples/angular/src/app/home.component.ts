@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { AWScope } from '@antarctic-wallet/aw-sdk';
 
 @Component({
   selector: 'app-home',
@@ -13,7 +14,7 @@ import { RouterLink } from '@angular/router';
       @for (item of scenarios; track item.route) {
         <article class="card">
           <h2>{{ item.title }}</h2>
-          <p class="scopes">Скоупы: <code>{{ item.scopes }}</code></p>
+          <p class="scopes">Скоупы: <code>{{ item.scopes.join(', ') }}</code></p>
           <a class="btn" [routerLink]="item.route">Открыть</a>
         </article>
       }
@@ -23,9 +24,9 @@ import { RouterLink } from '@angular/router';
 export class HomeComponent implements OnInit {
   appName = 'Загрузка...';
   scenarios = [
-    { title: 'Вход', scopes: 'userData', route: '/auth' },
-    { title: 'Донат', scopes: 'userData, pay', route: '/pay' },
-    { title: 'Покупка и возврат', scopes: 'userData, pay, receive', route: '/pay-refund' },
+    { title: 'Вход', scopes: [AWScope.USER_DATA], route: '/auth' },
+    { title: 'Донат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay' },
+    { title: 'Покупка и возврат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay-refund' },
   ];
 
   ngOnInit() {

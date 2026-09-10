@@ -3,11 +3,12 @@
  *
  * Заказ в проде — на вашем бэкенде. В демо статус только в UI.
  * receive исполняется сразу, без листа в кошельке.
- * Скоупы заданы в этом файле (`userData`, `pay`). `receive` — тип интента, не scope.
+ * Скоупы заданы в этом файле (`userData`, `pay`) — они нужны для покупки.
+ * `receive` — тип интента и не требует никакого скоупа.
  */
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
+import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 interface AppConfig {
@@ -15,7 +16,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData', 'pay'] as const;
+const SCOPES = [AWScope.USER_DATA, AWScope.PAY] as const;
 const ITEM_AMOUNT = '9.00';
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';

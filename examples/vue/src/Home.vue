@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { AWScope } from "@antarctic-wallet/aw-sdk";
 
 interface AppConfig {
   id: string;
@@ -14,11 +15,11 @@ onMounted(async () => {
 });
 
 const scenarios = [
-  { title: "Вход", scopes: "userData", route: "/auth" },
-  { title: "Донат", scopes: "userData, pay", route: "/pay" },
+  { title: "Вход", scopes: [AWScope.USER_DATA], route: "/auth" },
+  { title: "Донат", scopes: [AWScope.USER_DATA, AWScope.PAY], route: "/pay" },
   {
     title: "Покупка и возврат",
-    scopes: "userData, pay, receive",
+    scopes: [AWScope.USER_DATA, AWScope.PAY],
     route: "/pay-refund",
   },
 ];
@@ -33,7 +34,7 @@ const scenarios = [
     <article v-for="item in scenarios" :key="item.route" class="card">
       <h2>{{ item.title }}</h2>
       <p class="scopes">
-        Скоупы: <code>{{ item.scopes }}</code>
+        Скоупы: <code>{{ item.scopes.join(", ") }}</code>
       </p>
       <router-link class="btn" :to="item.route">Открыть</router-link>
     </article>

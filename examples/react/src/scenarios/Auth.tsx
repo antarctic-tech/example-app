@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AWInitError, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
+import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
 interface AppConfig {
@@ -18,7 +18,7 @@ interface AppConfig {
   name: string;
 }
 
-const SCOPES = ['userData'] as const;
+const SCOPES = [AWScope.USER_DATA] as const;
 
 type Status = 'idle' | 'connecting' | 'ready' | 'error';
 
@@ -192,7 +192,6 @@ export function Auth() {
             {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : null}
             <div>
               <div className="name">{user.displayName ?? 'Пользователь'}</div>
-              {user.walletAddress ? <div className="muted">{user.walletAddress}</div> : null}
             </div>
           </div>
           <p className="hint">
