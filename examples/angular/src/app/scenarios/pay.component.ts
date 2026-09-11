@@ -5,7 +5,7 @@
  * Возврата нет. Скоупы заданы в этом файле.
  */
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
@@ -126,13 +126,21 @@ export class PayComponent implements OnInit, OnDestroy {
   sdk: AWSDK | null = null;
   private session: AWSession | null = null;
 
-  constructor(private readonly cdr: ChangeDetectorRef) {}
+  constructor(
+    private readonly cdr: ChangeDetectorRef,
+    private readonly router: Router,
+  ) {}
 
   ngOnInit() {
     void this.prepareSdk();
   }
 
   ngOnDestroy() {
+    try {
+      this.sdk?.backButton.hide();
+    } catch {
+      // хост мог уже закрыть канал
+    }
     this.sdk?.destroy();
     this.sdk = null;
   }
@@ -145,7 +153,13 @@ export class PayComponent implements OnInit, OnDestroy {
     this.status = 'connecting';
     this.message = '';
     try {
-      await instance.init();
+      const pending = instance.init();
+      try {
+        instance.backButton.show();
+      } catch (error) {
+        this.message = asErrorMessage(error);
+      }
+      await pending;
     } catch (error) {
       this.status = 'error';
       if (error instanceof AWInitError || error instanceof AWTimeoutError) {
@@ -155,6 +169,7 @@ export class PayComponent implements OnInit, OnDestroy {
       }
     } finally {
       this.loggingIn = false;
+      this.cdr.detectChanges();
     }
   }
 
@@ -253,6 +268,10 @@ export class PayComponent implements OnInit, OnDestroy {
     });
     this.sdk = instance;
 
+    instance.backButton.onClick(() => {
+      void this.router.navigateByUrl('/');
+    });
+
     instance.events.on('sdk.ready', (s: AWSession) => {
       this.status = 'ready';
       this.session = s;
@@ -295,5 +314,6 @@ export class PayComponent implements OnInit, OnDestroy {
     });
 
     this.cdr.detectChanges();
+    void this.login();
   }
 }

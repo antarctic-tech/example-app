@@ -25,6 +25,7 @@ MUST:
 - Subscribe to SDK events **before** `init()`. Call `sdk.destroy()` on unmount.
 - Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`).
 - Vue: store the SDK instance in `shallowRef`. React: `useRef`. Angular: a class field. Never put the SDK class into reactive/deep state.
+- Nested screens: `onClick` → `init()` (starts the postMessage listener) → `backButton.show()`. `hide()` before `destroy()`. Use `onClick` **or** `events.on('backButton')`, not both. `show()` before `init()` draws the arrow but clicks never arrive.
 
 MUST NOT:
 
@@ -66,7 +67,7 @@ Copy **one** scenario file into your app — not Home or the router shell.
 
 `appId` → that project's `public/config.json` field `id` and backend `AW_APP_ID`.
 Scopes are **constants inside each scenario file**, not from `config.requiredScopes`.
-Each scenario: own `AWSDK` (Vue: `shallowRef`; React: `useRef`; Angular: class field); subscribe before `init()`; `init()` on login button in the example (callable on mount in prod iframe); `destroy()` on unmount.
+Each scenario: own `AWSDK` (Vue: `shallowRef`; React: `useRef`; Angular: class field); subscribe before `init()`; `init()` on scenario mount (needed for `backButton` presses; login button retries); `destroy()` on unmount. Scenario screens show the host back button and go to `/` on click; Home leaves it hidden (host shows Close).
 Router: hash (`#/auth`) so `?parentOrigin=` is preserved.
 Dev proxies `/api` → `http://127.0.0.1:3351`.
 Local mini-app App URL in AW settings: `https://127.0.0.1:<front-port>` (not `localhost`; hostname must contain `.`). `AW_API_BASE` is the API origin without a trailing `/api`.
@@ -172,9 +173,13 @@ Pressing it only delivers `backButton` / `onClick` handlers — the host never n
 closes the container. `sdk.destroy()` hides the arrow and drops handlers.
 
 ```ts
-sdk.backButton.onClick(() => router.back());
+sdk.backButton.onClick(() => router.push('/'));
+const pending = sdk.init(); // listener starts here; show() before init() is a no-op for clicks
 sdk.backButton.show();
+await pending;
 ```
+
+Use `onClick` **or** `events.on('backButton')`, not both. Home / root: leave the button hidden (host shows Close). `hide()` before `destroy()`.
 
 ### Outside the wallet
 
@@ -204,3 +209,4 @@ When generating a new mini-app:
 3. Set `config.json` `id` = dashboard `appId`. Set backend env. Never put secrets in the mini-app.
 4. Keep `/api/auth/session` and `/api/intents` as the only browser-facing AW-related routes (names may change; behavior must not). Webhook is AW → YOUR server.
 5. Store orders on YOUR backend. Close status via webhook in production (`intent.approved` / `intent.rejected`), not via the browser response.
+6. Nested screens: `onClick` → `init()` → `backButton.show()`. `hide()` before `destroy()`. Home / root: leave the host Close button.

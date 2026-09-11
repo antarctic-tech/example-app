@@ -122,6 +122,7 @@ iframe + нативный UI      ваш фронт + SDK             секре
 
 ```ts
 import { Component, OnDestroy, OnInit } from "@angular/core";
+import { Router } from "@angular/router";
 import { AWSDK, AWScope, AWInitError, AWTimeoutError } from "@antarctic-wallet/aw-sdk";
 
 const SCOPES = [AWScope.USER_DATA]; // в каждом сценарии свой набор
@@ -131,6 +132,8 @@ const SCOPES = [AWScope.USER_DATA]; // в каждом сценарии свой
 })
 export class AuthComponent implements OnInit, OnDestroy {
   sdk: AWSDK | null = null;
+
+  constructor(private readonly router: Router) {}
 
   async ngOnInit() {
     const config = await fetch("./config.json").then((r) => r.json());
@@ -152,6 +155,14 @@ export class AuthComponent implements OnInit, OnDestroy {
     instance.events.on("session.expired", () => {
       /* нужен новый init() */
     });
+
+    instance.backButton.onClick(() => {
+      void this.router.navigateByUrl("/");
+    });
+
+    const pending = instance.init();
+    instance.backButton.show();
+    await pending;
   }
 
   async login() {
@@ -168,6 +179,11 @@ export class AuthComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    try {
+      this.sdk?.backButton.hide();
+    } catch {
+      /* хост мог уже закрыть канал */
+    }
     this.sdk?.destroy();
     this.sdk = null;
   }
@@ -203,6 +219,13 @@ function getParentOrigin(): string {
 | `session.refreshed`  | Токен обновился — свежий `idToken` в payload     |
 | `operation.rejected` | Пользователь отклонил операцию в кошельке        |
 | `backButton`         | Нажата стрелка «Назад» в шапке кошелька           |
+
+### Кнопка «Назад»
+
+Сначала `init()` (включает слушатель), затем `show()` — иначе стрелка есть,
+а нажатие не доходит. В этом примере `onClick` ведёт на `/`. Перед
+`destroy()` вызовите `hide()`. `onClick` и `events.on("backButton")`
+срабатывают оба — одно из двух.
 
 ### Ошибки SDK
 

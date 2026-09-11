@@ -291,12 +291,16 @@ money; it is not your order database.
 navigation is entirely on your side and the container stays open.
 
 ```ts
-sdk.backButton.onClick(() => router.back());
+sdk.backButton.onClick(() => router.push("/"));
+const pending = sdk.init(); // postMessage listener starts here
 sdk.backButton.show();
+await pending;
 ```
 
-On Android the hardware back button behaves the same way while the arrow is
-visible. `sdk.destroy()` hides the arrow and drops the handlers.
+`show()` before `init()` draws the arrow in the host, but presses never
+reach the mini-app. On Android the hardware back button behaves the same way
+while the arrow is visible. `sdk.destroy()` hides the arrow and drops the
+handlers. Use `onClick` or `events.on("backButton")`, not both.
 
 ---
 

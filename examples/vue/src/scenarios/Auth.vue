@@ -10,6 +10,7 @@
  * Скоупы заданы в этом файле, не в config.json.
  */
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
+import { useRouter } from 'vue-router';
 import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
@@ -55,6 +56,7 @@ const trustedUserId = ref<string | null>(null);
 const message = ref('');
 const loggingIn = ref(false);
 const sdk = shallowRef<AWSDK | null>(null);
+const router = useRouter();
 
 async function verifyIdentity(idToken: string) {
   const response = await fetch('/api/auth/session', {
@@ -77,7 +79,7 @@ async function verifyIdentity(idToken: string) {
   trustedUserId.value = data.userId;
 }
 
-/** Создаёт SDK и подписывается на события. init() — только по кнопке. */
+/** Создаёт SDK, подписывается и вызывает init() — без него backButton не получает нажатия. */
 async function prepareSdk() {
   const config: AppConfig = await fetch('./config.json').then((r) => r.json());
   appName.value = config.name;
@@ -89,6 +91,10 @@ async function prepareSdk() {
     persistSession: true,
   });
   sdk.value = instance;
+
+  instance.backButton.onClick(() => {
+    void router.push('/');
+  });
 
   instance.events.on('sdk.ready', (session: AWSession) => {
     status.value = 'ready';
@@ -118,6 +124,8 @@ async function prepareSdk() {
     trustedUserId.value = null;
     message.value = 'Сессия истекла — войдите снова.';
   });
+
+  void login();
 }
 
 async function login() {
@@ -128,7 +136,14 @@ async function login() {
   status.value = 'connecting';
   message.value = '';
   try {
-    await instance.init();
+    // init() синхронно включает слушатель postMessage — иначе нажатие стрелки не дойдёт.
+    const pending = instance.init();
+    try {
+      instance.backButton.show();
+    } catch (error) {
+      message.value = asErrorMessage(error);
+    }
+    await pending;
   } catch (error) {
     status.value = 'error';
     if (error instanceof AWInitError || error instanceof AWTimeoutError) {
@@ -146,6 +161,11 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  try {
+    sdk.value?.backButton.hide();
+  } catch {
+    // хост мог уже закрыть канал
+  }
   sdk.value?.destroy();
   sdk.value = null;
 });

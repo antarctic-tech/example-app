@@ -123,10 +123,12 @@ iframe + нативный UI      ваш фронт + SDK             секре
 
 ```ts
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { AWSDK, AWScope, AWInitError, AWTimeoutError } from "@antarctic-wallet/aw-sdk";
 
 const SCOPES = [AWScope.USER_DATA]; // в каждом сценарии свой набор
 const sdkRef = useRef<AWSDK | null>(null);
+const navigate = useNavigate();
 
 useEffect(() => {
   let instance: AWSDK | null = null;
@@ -151,9 +153,22 @@ useEffect(() => {
     instance.events.on("session.expired", () => {
       /* нужен новый init() */
     });
+
+    instance.backButton.onClick(() => {
+      navigate("/");
+    });
+
+    const pending = instance.init();
+    instance.backButton.show();
+    await pending;
   })();
 
   return () => {
+    try {
+      instance?.backButton.hide();
+    } catch {
+      /* хост мог уже закрыть канал */
+    }
     instance?.destroy();
     sdkRef.current = null;
   };
@@ -202,6 +217,13 @@ function getParentOrigin(): string {
 | `session.refreshed`  | Токен обновился — свежий `idToken` в payload     |
 | `operation.rejected` | Пользователь отклонил операцию в кошельке        |
 | `backButton`         | Нажата стрелка «Назад» в шапке кошелька           |
+
+### Кнопка «Назад»
+
+Сначала `init()` (включает слушатель), затем `show()` — иначе стрелка есть,
+а нажатие не доходит. В этом примере `onClick` ведёт на `/`. Перед
+`destroy()` вызовите `hide()`. `onClick` и `events.on("backButton")`
+срабатывают оба — одно из двух.
 
 ### Ошибки SDK
 

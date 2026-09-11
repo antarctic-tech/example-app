@@ -124,6 +124,7 @@ import { AWSDK, AWScope, AWInitError, AWTimeoutError } from "@antarctic-wallet/a
 const SCOPES = [AWScope.USER_DATA]; // в каждом сценарии свой набор
 
 const sdk = shallowRef<AWSDK | null>(null);
+const router = useRouter();
 
 onMounted(async () => {
   const config = await fetch("./config.json").then((r) => r.json());
@@ -148,6 +149,14 @@ onMounted(async () => {
   instance.events.on("session.expired", () => {
     /* нужен новый init() */
   });
+
+  instance.backButton.onClick(() => {
+    void router.push("/");
+  });
+
+  const pending = instance.init();
+  instance.backButton.show();
+  await pending;
 });
 
 async function login() {
@@ -164,6 +173,11 @@ async function login() {
 }
 
 onUnmounted(() => {
+  try {
+    sdk.value?.backButton.hide();
+  } catch {
+    /* хост мог уже закрыть канал */
+  }
   sdk.value?.destroy();
   sdk.value = null;
 });
@@ -201,6 +215,13 @@ function getParentOrigin(): string {
 | `session.refreshed`  | Токен обновился — свежий `idToken` в payload     |
 | `operation.rejected` | Пользователь отклонил операцию в кошельке        |
 | `backButton`         | Нажата стрелка «Назад» в шапке кошелька           |
+
+### Кнопка «Назад»
+
+Сначала `init()` (включает слушатель), затем `show()` — иначе стрелка есть,
+а нажатие не доходит. В этом примере `onClick` ведёт на `/`. Перед
+`destroy()` вызовите `hide()`. `onClick` и `events.on("backButton")`
+срабатывают оба — одно из двух.
 
 ### Ошибки SDK
 

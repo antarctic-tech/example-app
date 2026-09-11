@@ -5,7 +5,7 @@
  * Возврата нет. Скоупы заданы в этом файле.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
@@ -56,6 +56,7 @@ function readOperationId(payload: Record<string, unknown>): string | null {
 export function Pay() {
   const sdkRef = useRef<AWSDK | null>(null);
   const sessionRef = useRef<AWSession | null>(null);
+  const navigate = useNavigate();
   const [status, setStatus] = useState<Status>('idle');
   const [appName, setAppName] = useState('Загрузка...');
   const [user, setUser] = useState<AWUserContext | null>(null);
@@ -82,6 +83,10 @@ export function Pay() {
       });
       sdkRef.current = instance;
       setHasSdk(true);
+
+      instance.backButton.onClick(() => {
+        navigate('/');
+      });
 
       instance.events.on('sdk.ready', (s: AWSession) => {
         setStatus('ready');
@@ -117,16 +122,40 @@ export function Pay() {
       instance.events.on('operation.rejected', ({ reason }) => {
         setMessage(`Отклонено: ${reason}`);
       });
+
+      if (cancelled) return;
+      setLoggingIn(true);
+      setStatus('connecting');
+      try {
+        const pending = instance.init();
+        try {
+          instance.backButton.show();
+        } catch (error) {
+          setMessage(asErrorMessage(error));
+        }
+        await pending;
+      } catch (error) {
+        if (cancelled) return;
+        setStatus('error');
+        setMessage(asErrorMessage(error));
+      } finally {
+        if (!cancelled) setLoggingIn(false);
+      }
     }
 
     void prepareSdk();
 
     return () => {
       cancelled = true;
+      try {
+        instance?.backButton.hide();
+      } catch {
+        // хост мог уже закрыть канал
+      }
       instance?.destroy();
       sdkRef.current = null;
     };
-  }, []);
+  }, [navigate]);
 
   function currentIdToken(): string | null {
     return sdkRef.current?.idToken ?? sessionRef.current?.idToken ?? null;
@@ -219,7 +248,13 @@ export function Pay() {
     setStatus('connecting');
     setMessage('');
     try {
-      await instance.init();
+      const pending = instance.init();
+      try {
+        instance.backButton.show();
+      } catch (error) {
+        setMessage(asErrorMessage(error));
+      }
+      await pending;
     } catch (error) {
       setStatus('error');
       if (error instanceof AWInitError || error instanceof AWTimeoutError) {

@@ -6,6 +6,7 @@
  * Возврата нет. Скоупы заданы в этом файле.
  */
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
+import { useRouter } from 'vue-router';
 import { AWInitError, AWScope, AWSDK, AWTimeoutError } from '@antarctic-wallet/aw-sdk';
 import type { AWSession, AWUserContext } from '@antarctic-wallet/aw-sdk';
 
@@ -62,6 +63,7 @@ const loggingIn = ref(false);
 const busy = ref(false);
 const session = ref<AWSession | null>(null);
 const sdk = shallowRef<AWSDK | null>(null);
+const router = useRouter();
 
 function currentIdToken(): string | null {
   return sdk.value?.idToken ?? session.value?.idToken ?? null;
@@ -158,6 +160,10 @@ async function prepareSdk() {
   });
   sdk.value = instance;
 
+  instance.backButton.onClick(() => {
+    void router.push('/');
+  });
+
   instance.events.on('sdk.ready', (s: AWSession) => {
     status.value = 'ready';
     session.value = s;
@@ -191,6 +197,8 @@ async function prepareSdk() {
   instance.events.on('operation.rejected', ({ reason }) => {
     message.value = `Отклонено: ${reason}`;
   });
+
+  void login();
 }
 
 async function login() {
@@ -201,7 +209,13 @@ async function login() {
   status.value = 'connecting';
   message.value = '';
   try {
-    await instance.init();
+    const pending = instance.init();
+    try {
+      instance.backButton.show();
+    } catch (error) {
+      message.value = asErrorMessage(error);
+    }
+    await pending;
   } catch (error) {
     status.value = 'error';
     if (error instanceof AWInitError || error instanceof AWTimeoutError) {
@@ -219,6 +233,11 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  try {
+    sdk.value?.backButton.hide();
+  } catch {
+    // хост мог уже закрыть канал
+  }
   sdk.value?.destroy();
   sdk.value = null;
 });
