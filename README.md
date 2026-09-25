@@ -7,15 +7,24 @@ Wallet as a **mini app**: the user opens the wallet, sees your app inside, signs
 in and (if needed) pays. Confirmation always happens in the wallet's native UI,
 never in your markup.
 
-| Stack   | Example                                            |
-| ------- | -------------------------------------------------- |
-| Vue     | [examples/vue](./examples/vue)                     |
-| React   | [examples/react](./examples/react)                 |
-| Angular | [examples/angular](./examples/angular)             |
-| Backend | [examples/backend-node](./examples/backend-node)   |
+**Frontend**
+
+| Stack   | Example                                |
+| ------- | -------------------------------------- |
+| Vue     | [examples/vue](./examples/vue)         |
+| React   | [examples/react](./examples/react)     |
+| Angular | [examples/angular](./examples/angular) |
+
+**Backend**
+
+| Stack | Example                                          |
+| ----- | ------------------------------------------------ |
+| Node  | [examples/backend-node](./examples/backend-node) |
+| PHP   | [examples/backend-php](./examples/backend-php)   |
 
 Open the folder for your stack — its README covers the scenarios and how to run
-them (those are written in Russian; this file is the full English reference).
+them. Frontend example READMEs are in Russian; backend examples ship both
+`README.md` (EN) and `README.ru.md`. This file is the full English reference.
 Running locally without Docker: [Local run](#local-run-without-docker).
 Container: [Deploying with the Dockerfile](#deploying-with-the-dockerfile).
 The steps below are the same for every framework.
@@ -36,7 +45,7 @@ confirmation          postMessage to wallet      calls to the AW API
 
 1. The wallet opens your frontend in an iframe.
 2. The frontend loads [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk)
-   (requires **>= 0.4.0**) and calls `init`.
+   (requires **>= 0.4.2**) and calls `init`.
 3. Payments and scopes on the AW side are created by **your server**
    (`POST /api/apps/v1/intents`). The browser never sees the secret.
 4. The frontend only asks the wallet to show the confirmation sheet:
@@ -213,7 +222,9 @@ The server verifies the token really came from AW (keys at
 If you asked for the `userData` scope, the token also carries KYC flags:
 `hasKyc`, `hasKycData`, `kycCountry`. There is no phone number or email in it.
 
-Reference: `POST /api/auth/session` in [examples/backend-node](./examples/backend-node).
+Reference: `POST /api/auth/session` in
+[examples/backend-node](./examples/backend-node) or
+[examples/backend-php](./examples/backend-php).
 
 ---
 
@@ -266,8 +277,9 @@ Authorization: Bearer <AW_API_SECRET>
 
 In the body sent to AW the user field is `user_app_login`. That is the `sub`
 from the verified token, not whatever arrived from the browser. AW rejects the
-old `user_id` field (`422 USER_ID_NOT_ACCEPTED`). Building the request on Node
-is covered in the backend README.
+old `user_id` field (`422 USER_ID_NOT_ACCEPTED`). Building the request is
+covered in the [Node](./examples/backend-node) and
+[PHP](./examples/backend-php) backend READMEs.
 
 The order id (`reference_id`) is also set on the server. For a refund
 (`receive`) it is mandatory: without it a retried request can send the money
@@ -297,8 +309,9 @@ sdk.backButton.show();
 await pending;
 ```
 
-`show()` before `init()` draws the arrow in the host, but presses never
-reach the mini-app. On Android the hardware back button behaves the same way
+`show()` and `hide()` before `init()` are remembered and sent once the
+channel is open. Presses arrive only after `init()` starts the postMessage
+listener. On Android the hardware back button behaves the same way
 while the arrow is visible. `sdk.destroy()` hides the arrow and drops the
 handlers. Use `onClick` or `events.on("backButton")`, not both.
 
@@ -359,10 +372,12 @@ SDK sources and reference (EN/RU): [antarctic-tech/aw-sdk](https://github.com/an
 Two processes: the backend and the frontend dev server. Stack-specific details
 are in each example's README (`vue` / `react` / `angular`).
 
-1. Backend: `examples/backend-node` → `cp .env.example .env` → fill in the keys
-   you got from AW → `npm start`. It listens on `http://127.0.0.1:3351`.
-   `npm start` picks up `.env` via `node --env-file=.env`. Logs go to that
-   terminal.
+1. Backend — pick one:
+   - Node: `examples/backend-node` → `cp .env.example .env` → fill in the keys
+     from AW → `npm start` (loads `.env` via `node --env-file=.env`).
+   - PHP: `examples/backend-php` → `cp .env.example .env` → fill in the keys
+     → `composer install` → `composer start`.
+   Both listen on `http://127.0.0.1:3351`. Logs go to that terminal.
 2. Frontend: run `npm run dev` in your stack's folder.
    HTTPS on `127.0.0.1` (Vue `:5184`, React `:5185`, Angular `:5186`), with
    `/api` proxied to the backend.

@@ -1,0 +1,18 @@
+# Shared hosting / Apache: route API through index.php; prefer Vue shell for /
+DirectoryIndex index.html index.php
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # If the app is in a subdirectory, change to e.g. RewriteBase /miniapp/
+  RewriteBase /
+
+  # Real files (index.html, assets/*, config.json) — serve as-is
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # Do not treat the directory itself as "done" — fall through so / can use DirectoryIndex
+  # API and unknown paths → front controller
+  RewriteRule ^ index.php [L]
+</IfModule>
+
+Options -Indexes

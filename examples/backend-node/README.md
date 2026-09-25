@@ -57,7 +57,7 @@ the frontend and never into a request body coming from the browser.
 
 ```
 # API origin without the /api suffix
-AW_API_BASE=https://api.example.com
+AW_API_BASE=https://app.antarcticwallet.com
 AW_APP_ID=your-app-id
 AW_API_SECRET=…
 PORT=3351

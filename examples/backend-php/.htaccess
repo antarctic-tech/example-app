@@ -1,0 +1,30 @@
+# Safety net if the host document root is the project root by mistake.
+# Prefer pointing the vhost / subdomain at the `public/` directory instead.
+
+<FilesMatch "^\.env">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_authz_core.c>
+  <Files "server.php">
+    Require all denied
+  </Files>
+  <Files "composer.json">
+    Require all denied
+  </Files>
+  <Files "composer.lock">
+    Require all denied
+  </Files>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^(vendor|src)/ - [F,L]
+  RewriteRule ^$ public/ [L]
+  RewriteRule (.+) public/$1 [L]
+</IfModule>

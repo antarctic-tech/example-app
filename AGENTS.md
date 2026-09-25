@@ -3,7 +3,7 @@
 Human docs: `README.ru.md` (RU) / `README.md` (EN). Do not rewrite those files for pedagogy.
 This file is the source of truth for code generation.
 
-Requires `@antarctic-wallet/aw-sdk` **>= 0.4.0**. SDK reference:
+Requires `@antarctic-wallet/aw-sdk` **>= 0.4.2**. SDK reference:
 [antarctic-tech/aw-sdk](https://github.com/antarctic-tech/aw-sdk).
 
 You are implementing a **partner mini-app**, not Antarctic Wallet (AW).
@@ -20,12 +20,12 @@ MUST:
 - Intents: YOUR server POSTs `${AW_API_BASE}/api/apps/v1/intents` with `X-Aw-App-Id` and `Authorization: Bearer`. Browser never sees `api_secret`.
 - After `{ operationId, status }` for `pay` / `scopes`, frontend only calls `sdk.operations.requestConfirmation(operationId)`. `receive` is executed immediately; do not confirm it in the wallet.
 - `user_app_login` in the AW body comes from verified JWT `sub`, never from request body / `userContext`. Sending `user_id` to AW returns `422 USER_ID_NOT_ACCEPTED`.
-- Secrets: `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET` only in backend `.env`. Webhooks are HMAC-signed with the same `app_secret`.
+- Secrets: `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET` only in backend `.env`. Webhooks (still in development) are HMAC-signed with the same `app_secret`.
 - `appId` → mini-app `public/config.json` field `id` and backend `AW_APP_ID` (same value).
 - Subscribe to SDK events **before** `init()`. Call `sdk.destroy()` on unmount.
-- Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`).
-- Vue: store the SDK instance in `shallowRef`. React: `useRef`. Angular: a class field. Never put the SDK class into reactive/deep state.
-- Nested screens: `onClick` → `init()` (starts the postMessage listener) → `backButton.show()`. `hide()` before `destroy()`. Use `onClick` **or** `events.on('backButton')`, not both. `show()` before `init()` draws the arrow but clicks never arrive.
+- Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`, `AWScanQrError`).
+- Vue: store the SDK instance in `shallowRef`. React: `useRef`. Angular: a class field. Never put the SDK class into reactive/deep state. `@antarctic-wallet/aw-sdk/vue` exports `useAWSdk` (`init` on mount, `destroy` on unmount). Example scenarios do not use it: the login button retries `init()`. Copy the scenario.
+- Nested screens: `onClick` **or** `events.on('backButton')` (not both — both fire) → `init()` (starts the postMessage listener; presses are dropped until it runs) → `backButton.show()`. `show()` / `hide()` before `init()` are queued and sent once the channel is open (after the handshake, or after a restored session). A retried handshake resends the arrow if it should stay visible. `hide()` before `destroy()`. Android hardware back follows the same contract while the arrow is visible.
 
 MUST NOT:
 
@@ -38,11 +38,12 @@ MUST NOT:
 
 AW surface you may use (closed set):
 
-- SDK in iframe: `init`, session, scopes, `requestConfirmation`, `backButton`
+- SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
 - JWKS: `GET ${AW_API_BASE}/api/v2/sdk/jwks`
 - B2B: Bearer `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
 - B2B poll: `GET ${AW_API_BASE}/api/apps/v1/intents/:operationId_or_referenceId`
-- Webhook: signed `intent.approved` / `intent.rejected` / `payment.succeeded` / `payment.failed` to YOUR `webhook_url` (HMAC with `app_secret`)
+- B2B app balance: `GET ${AW_API_BASE}/api/apps/v1/balance` — the app account, not the user's `balance` scope
+- Webhook (**in development**, not a stable contract): signed `intent.approved` / `intent.rejected` / `payment.succeeded` / `payment.failed` to YOUR `webhook_url` (HMAC with `app_secret`)
 
 Partner domain (orders, catalog, your session cookies) lives on YOUR backend, not on AW.
 
@@ -63,7 +64,7 @@ Copy **one** scenario file into your app — not Home or the router shell.
 | Sign-in only | `vue/src/scenarios/Auth.vue` | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData` |
 | Sign-in + pay/donate | `…/Pay.vue` | `…/Pay.tsx` | `…/pay.component.ts` | `userData`, `pay` |
 | Pay + refund | `…/PayRefund.vue` | `…/PayRefund.tsx` | `…/pay-refund.component.ts` | `userData`, `pay` |
-| Backend (always) | `examples/backend-node/server.mjs` | same | same | — |
+| Backend (always) | `examples/backend-node/server.mjs` or `examples/backend-php/server.php` | same | same | — |
 
 `appId` → that project's `public/config.json` field `id` and backend `AW_APP_ID`.
 Scopes are **constants inside each scenario file**, not from `config.requiredScopes`.
@@ -84,7 +85,7 @@ confirms operations      postMessage to parentOrigin  JWKS verify + POST intents
 2. Front: `fetch('./config.json')` → `new AWSDK({ appId: config.id, scopes: [...SCOPES], parentOrigin, persistSession: true })`. `SCOPES` is the constant in the scenario file, not `config.requiredScopes`.
 3. Events, then `init()`. On `sdk.ready`: show `userContext` in UI; POST `sdk.idToken` to YOUR `/api/auth/session`.
 4. Pay: POST YOUR `/api/intents` `{ idToken, type, amount }` → `{ operationId, status }`. If `status` is `pending`, call `requestConfirmation`. `receive` comes back already `approved`/`failed`.
-5. `parentOrigin` resolution: `?parentOrigin=` → else `document.referrer` origin if in iframe → else `https://localhost:3310`.
+5. `parentOrigin` resolution: `?parentOrigin=` → else `document.referrer` origin if in iframe → else `https://localhost:3310`. Keep launch params `awPlatform`, `awColorScheme`, `awLanguageCode` on that same query string (hash router). They are readable on `sdk.platform` / `colorScheme` / `languageCode` before `init()`.
 
 ## Contracts
 
@@ -131,9 +132,21 @@ Never send `user_id` (422 `USER_ID_NOT_ACCEPTED`).
 `receive` executes immediately; response `status` is already `approved` or `failed`.
 Normalize `operationId` from `data.operationId` / `data.operation_id` / `operationId` / `operation_id`.
 
+App account balance (same headers, no user, no `balance` scope):
+
+```
+GET ${AW_API_BASE}/api/apps/v1/balance
+```
+
+→ `[{ "asset": "USD", "total": { "amount": 100, "scale": 0 }, "available": { "amount": 70, "scale": 0 }, "locked": { "amount": 30, "scale": 0 } }]`
+
+One element per currency; only `USD` for now. `available` is `max(total − locked, 0)`. Amounts are `{ amount, scale }` (100 whole units → `scale: 0`). `locked` is the cooling hold. The example server does not proxy this route.
+
 JWT: `jose.jwtVerify(idToken, createRemoteJWKSet(${AW_API_BASE}/api/v2/sdk/jwks), { issuer: 'aw', audience: appId })`.
 
-### AW → YOUR backend (webhook)
+### AW → YOUR backend (webhook) — in development
+
+Webhooks are not finished. Do not treat this as a stable API, do not build production order settlement on it, and do not invent a replacement AW callback. The block below is the current draft; the example only verifies the signature and logs the event.
 
 Set `webhook_url` on the SdkApp (admin dashboard). Not browser-facing.
 
@@ -148,21 +161,26 @@ Reject if drift > 5 min or signature mismatch. Dedupe on `data.operation_id` + `
 
 ### SDK (frontend)
 
-Constructor: `{ appId, scopes, parentOrigin, persistSession?: true, debug?: boolean, timeout?: 30000, retry?: { maxAttempts: 3, baseDelay: 1000 } }`
+Constructor: `{ appId, scopes, parentOrigin, persistSession?: boolean, debug?: boolean, timeout?: 30000, retry?: { maxAttempts: 3, baseDelay: 1000 } }`
 
-`retry` covers handshake / session / scopes. It is never applied to `requestConfirmation` (waits for a human).
+`persistSession` defaults to `true` (sessionStorage, per `appId`). `destroy()` clears it.
+`retry` covers handshake / session / scopes. It is never applied to `requestConfirmation` (waits for a human) or `scanQr` (waits for a scan, a close, or `destroy()`). The config `timeout` does not apply to `scanQr`.
 
 Events (subscribe before `init`):
 
 | Event | Action |
 |-------|--------|
 | `sdk.ready` | UI from `session.userContext`; send `sdk.idToken` (null-check) to `/api/auth/session` |
-| `sdk.error` | Fatal; stop |
+| `sdk.error` | Unsolicited host error, or `init()` failed; stop. An `ERROR` that answers a request rejects that call and does not emit `sdk.error` |
 | `session.expired` | Clear UI; `sdk.init()` again |
 | `session.refreshed` | Replace stored `idToken` |
-| `scopes.granted` | Update granted scopes |
+| `scopes.granted` | On ready (the granted set) and after a `scopes` operation |
 | `operation.rejected` | User declined in wallet; also thrown as `AWOperationError` with `errorCode: 'user_rejected'` |
 | `backButton` | Host back arrow pressed; you navigate, the container stays open |
+| `themeChanged` | `sdk.colorScheme` changed (`light` / `dark`; system theme already resolved). No payload |
+| `languageChanged` | `sdk.languageCode` changed (BCP 47). No payload |
+| `safeAreaChanged` | `sdk.safeAreaInset` changed (`{ top, right, bottom, left }`). No payload |
+| `activated` / `deactivated` | App went on / off screen (`sdk.isActive`). No payload |
 
 `idToken` may be null while session is pending — do not POST it.
 
@@ -174,12 +192,25 @@ closes the container. `sdk.destroy()` hides the arrow and drops handlers.
 
 ```ts
 sdk.backButton.onClick(() => router.push('/'));
-const pending = sdk.init(); // listener starts here; show() before init() is a no-op for clicks
+const pending = sdk.init(); // listener starts here; show() before this is queued, not dropped
 sdk.backButton.show();
 await pending;
 ```
 
-Use `onClick` **or** `events.on('backButton')`, not both. Home / root: leave the button hidden (host shows Close). `hide()` before `destroy()`.
+`backButton.offClick(handler)` removes one handler. `backButton.isVisible` is the last requested state.
+Use `onClick` **or** `events.on('backButton')`, not both. Home / root: leave the button hidden (host shows Close). `hide()` before `destroy()`. `destroy()` also rejects in-flight requests (an open `scanQr` fails), drops `--aw-*` CSS variables, and clears `backgroundColor`.
+
+### Host environment, scanner, haptics, background (0.4.2)
+
+Properties before `init()`: `platform` (`web` | `tma` | `ios` | `android`), `colorScheme`, `languageCode`. `safeAreaInset` and `isActive` are filled by the time `init()` resolves. `isActive` starts `true` and stays `true` if the host never sends visibility. An older wallet that sends no snapshot does not block `init()` and does not emit `sdk.error`.
+
+SDK writes `--aw-safe-area-inset-top|right|bottom|left` and `--aw-color-scheme` on `:root`. A variable is absent until the value arrives — always provide a CSS fallback. `refreshEnvironment()` re-asks for theme, language, and safe area only (visibility is push-only).
+
+`scanQr(): Promise<string>` opens the wallet scanner and resolves with the decoded string. No caption argument. Rejects `AWScanQrError` (`errorCode`: `closed`, `not_active`, `already_open`, `camera_denied`, `unsupported`, `generic_error`). Call `sdk.isCommandAvailable(AWCommand.OpenScanQr)` first: optional commands need an explicit host entry, otherwise `scanQr` throws `unsupported`. If the host reported no `supportedCommands` map, required commands are assumed available; optional ones are not.
+
+`hapticFeedback.impactOccurred('light' | 'medium' | 'heavy' | 'rigid' | 'soft')`, `notificationOccurred('success' | 'warning' | 'error')`, `selectionChanged()`. Fire-and-forget. Nothing happens while the app is inactive or the user disabled vibration. Older wallets ignore it.
+
+`setBackgroundColor('#rgb' | '#rrggbb')` paints the WebView / iframe under the page (overscroll). Returns `false` for an invalid color and does not send. Short form is stored on `sdk.backgroundColor` as lowercase `#rrggbb`. No reply; older wallets ignore it. Call again on `themeChanged`.
 
 ### Outside the wallet
 
@@ -207,6 +238,6 @@ When generating a new mini-app:
 1. Copy the matching scenario file from `examples/vue`, `examples/react`, or `examples/angular` (same SDK calls).
 2. Copy `examples/backend-node/server.mjs` + `.env.example`. Do not add extra AW endpoints.
 3. Set `config.json` `id` = dashboard `appId`. Set backend env. Never put secrets in the mini-app.
-4. Keep `/api/auth/session` and `/api/intents` as the only browser-facing AW-related routes (names may change; behavior must not). Webhook is AW → YOUR server.
-5. Store orders on YOUR backend. Close status via webhook in production (`intent.approved` / `intent.rejected`), not via the browser response.
-6. Nested screens: `onClick` → `init()` → `backButton.show()`. `hide()` before `destroy()`. Home / root: leave the host Close button.
+4. Keep `/api/auth/session` and `/api/intents` as the only browser-facing AW-related routes (names may change; behavior must not). Webhook is AW → YOUR server and is still in development.
+5. Store orders on YOUR backend. Do not close paid/refunded state from the browser response. Do not close it from the webhook either until that channel leaves development.
+6. Nested screens: back handler → `init()` → `backButton.show()`. `show()` / `hide()` before `init()` are queued. `hide()` before `destroy()`. Home / root: leave the host Close button.

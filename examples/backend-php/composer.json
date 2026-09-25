@@ -1,0 +1,14 @@
+{
+  "name": "antarctic-wallet/example-embed-app-backend-php",
+  "description": "Partner mini-app backend reference (PHP) for Antarctic Wallet",
+  "type": "project",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.1",
+    "firebase/php-jwt": "^7.0"
+  },
+  "scripts": {
+    "start": "@php -S 0.0.0.0:3351 server.php",
+    "dev": "@php -S 0.0.0.0:3351 server.php"
+  }
+}

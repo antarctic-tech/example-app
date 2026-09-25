@@ -40,7 +40,7 @@ npm start            # http://127.0.0.1:3351
 В `.env`:
 
 ```
-AW_API_BASE=https://api.example.com
+AW_API_BASE=https://app.antarcticwallet.com
 AW_APP_ID=ваш-app-id
 AW_API_SECRET=…
 PORT=3351

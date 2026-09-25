@@ -7,12 +7,20 @@ Antarctic Wallet как **mini app**: пользователь открывае�
 приложение внутри, входит и (если нужно) платит. Подтверждение всегда в
 нативном UI кошелька, не в вашей вёрстке.
 
-| Стек    | Пример                                             |
-| ------- | -------------------------------------------------- |
+**Frontend**
+
+| Стек    | Пример                                 |
+| ------- | -------------------------------------- |
 | Vue     | [examples/vue](./examples/vue)         |
 | React   | [examples/react](./examples/react)     |
 | Angular | [examples/angular](./examples/angular) |
-| Бэкенд  | [examples/backend-node](./examples/backend-node)   |
+
+**Backend**
+
+| Стек | Пример                                           |
+| ---- | ------------------------------------------------ |
+| Node | [examples/backend-node](./examples/backend-node) |
+| PHP  | [examples/backend-php](./examples/backend-php)   |
 
 Откройте папку своего стека — там README со сценариями и запуском.
 Локально без Docker: [Локальный запуск](#локальный-запуск-без-docker).
@@ -35,7 +43,7 @@ iframe + UI           ваш фронт + SDK            секрет, сесс�
 
 1. Кошелёк открывает ваш фронт в iframe.
 2. Фронт поднимает [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk)
-   (нужна версия **>= 0.4.0**) и делает `init`.
+   (нужна версия **>= 0.4.2**) и делает `init`.
 3. Платежи и скоупы на стороне AW создаёт **ваш сервер**
    (`POST /api/apps/v1/intents`). Браузер секрет не видит.
 4. Фронт только просит кошелёк показать лист подтверждения:
@@ -210,7 +218,9 @@ await fetch("/api/auth/session", {
 Если просили scope `userData`, в токене ещё флаги KYC: `hasKyc`,
 `hasKycData`, `kycCountry`. Телефона и email там нет.
 
-Образец: `POST /api/auth/session` в [examples/backend-node](./examples/backend-node).
+Образец: `POST /api/auth/session` в
+[examples/backend-node](./examples/backend-node) или
+[examples/backend-php](./examples/backend-php).
 
 ---
 
@@ -263,7 +273,8 @@ Authorization: Bearer <AW_API_SECRET>
 
 В теле к AW поле пользователя — `user_app_login`. Это `sub` из проверенного
 токена, не то, что пришло из браузера. Старое поле `user_id` AW отвергает
-(`422 USER_ID_NOT_ACCEPTED`). Как собрать запрос на Node — в README бэкенда.
+(`422 USER_ID_NOT_ACCEPTED`). Как собрать запрос — в README бэкенда
+[Node](./examples/backend-node) или [PHP](./examples/backend-php).
 
 Id заказа (`reference_id`) тоже ставьте на сервере. Для возврата (`receive`)
 он обязателен: иначе повтор запроса может отправить деньги дважды.
@@ -291,8 +302,9 @@ sdk.backButton.show();
 await pending;
 ```
 
-`show()` до `init()` нарисует стрелку в хосте, но нажатия до мини-приложения
-не дойдут. На Android аппаратная кнопка «Назад» работает так же, пока стрелка
+`show()` и `hide()` до `init()` запоминаются и уходят, когда канал открыт.
+Нажатия доходят только после того, как `init()` включил слушатель postMessage.
+На Android аппаратная кнопка «Назад» работает так же, пока стрелка
 видима. `sdk.destroy()` прячет стрелку и снимает хендлеры. `onClick` и
 `events.on("backButton")` срабатывают оба — подписывайтесь на одно.
 
@@ -350,9 +362,12 @@ await pending;
 Два процесса: бэкенд и dev-сервер фронта. Подробности стека — в README папки
 примера (`vue` / `react` / `angular`).
 
-1. Бэкенд: `examples/backend-node` → `cp .env.example .env` → указываем ключи полученные от AW → `npm start`.
-   Слушает `http://127.0.0.1:3351`. `npm start` подхватывает `.env` через
-   `node --env-file=.env`. Логи — в этом терминале.
+1. Бэкенд — выберите один:
+   - Node: `examples/backend-node` → `cp .env.example .env` → ключи от AW →
+     `npm start` (`.env` через `node --env-file=.env`).
+   - PHP: `examples/backend-php` → `cp .env.example .env` → ключи →
+     `composer install` → `composer start`.
+   Оба слушают `http://127.0.0.1:3351`. Логи — в этом терминале.
 2. Фронт: в папке стека `npm run dev`.
    HTTPS на `127.0.0.1` (Vue `:5184`, React `:5185`, Angular `:5186`), `/api` проксируется на бэкенд.
 3. В AW, в настройках mini-app, поле **App URL**: `https://127.0.0.1:5184` (или порт своего стека).

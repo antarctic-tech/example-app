@@ -9,7 +9,7 @@
     "preview": "vite preview --port 5185"
   },
   "dependencies": {
-    "@antarctic-wallet/aw-sdk": "^0.4.0",
+    "@antarctic-wallet/aw-sdk": "^0.4.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.6.0"
