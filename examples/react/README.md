@@ -4,8 +4,8 @@
 
 React + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 
-Один проект, три сценария. Вставьте свой `appId`, запустите — и увидите, как работает
-вход, платёж и возврат внутри кошелька.
+Один проект, четыре сценария. Вставьте свой `appId`, запустите — и увидите, как работает
+вход, платёж, возврат и открытие другой апки внутри кошелька.
 
 ## Сценарии
 
@@ -14,8 +14,10 @@ React + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 | **Вход**              | Авторизация пользователя, получение доверенного `userId` | [`src/scenarios/Auth.tsx`](./src/scenarios/Auth.tsx)           | `userData`                   |
 | **Донат**             | Вход + односторонний платёж (без возврата)               | [`src/scenarios/Pay.tsx`](./src/scenarios/Pay.tsx)             | `userData`, `pay`            |
 | **Покупка и возврат** | Вход + покупка + возврат                                 | [`src/scenarios/PayRefund.tsx`](./src/scenarios/PayRefund.tsx) | `userData`, `pay`            |
+| **Открыть апку**      | `sdk.openApp`: другая апка по `appId`                    | [`src/scenarios/OpenApp.tsx`](./src/scenarios/OpenApp.tsx)     | `userData`                   |
 
-Стартовая страница (`#/`) — каталог примеров. **В свой продукт копируйте один файл
+Стартовая страница (`#/`) — каталог примеров. Под названием мини-апки она показывает
+[`start_param`](#стартовый-параметр) этого открытия. **В свой продукт копируйте один файл
 из `src/scenarios/`**, а не всё приложение.
 
 ---
@@ -225,9 +227,24 @@ function getParentOrigin(): string {
 `destroy()` вызовите `hide()`. `onClick` и `events.on("backButton")`
 срабатывают оба — одно из двух.
 
+### Стартовый параметр
+
+`sdk.startParam` — строка `start_param`, которую хост передал при открытии
+этой мини-апки. Читайте её после `init()`. Это параметр открытия, не скоуп и не
+сессия.
+
+На каталоге (`#/`) она стоит под названием. `…` — хендшейк ещё идёт. Строка —
+значение от хоста. `—` — параметра нет: страница открыта вне кошелька,
+хост его не прислал или строка не прошла проверку. Этот экран скоупы не
+запрашивает и сессию не сохраняет.
+
+Не длиннее 512 символов, алфавит `A-Za-z0-9_-`. SDK не читает `start_param` из
+URL страницы. `refreshSession()` значение не меняет, `destroy()` его сбрасывает.
+Полный контракт — [в общем README](../../README.ru.md#стартовый-параметр).
+
 ### Ошибки SDK
 
-Ловите через `instanceof`: `AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`.
+Ловите через `instanceof`: `AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`, `AWOpenAppError`.
 
 Полный файл: [`src/scenarios/Auth.tsx`](./src/scenarios/Auth.tsx)
 
@@ -415,6 +432,36 @@ async function refund(amount: string) {
 В проде статус заказа храните **на своём бэкенде** и закрывайте через вебхук.
 
 Полный файл: [`src/scenarios/PayRefund.tsx`](./src/scenarios/PayRefund.tsx)
+
+---
+
+## 5. Открыть другую апку
+
+Экран `#/open-app`. После входа вызывает `sdk.openApp`. Скоуп `userData` нужен
+только для хендшейка: сам метод скоупов не просит и на бэкенд не ходит.
+
+Нужна сборка `@antarctic-wallet/aw-sdk` из ветки `aw-2108`. В npm `0.4.2` метода
+ещё нет.
+
+```ts
+import { AWOpenAppError } from "@antarctic-wallet/aw-sdk";
+
+try {
+  await sdk.openApp({ appId: "other-mini-app" });
+} catch (error) {
+  if (error instanceof AWOpenAppError) {
+    error.errorCode;
+    // not_found | blocked | suspended | stack_limit | rate_limited
+    // same_app | invalid_app_id | unsupported | generic_error
+  }
+}
+```
+
+Свой `appId` даёт `same_app`: SDK отклоняет вызов сам, на хост он не уходит.
+Отказ кошелька приходит тем же `AWOpenAppError`. Успешный вызов открывает
+**другую** зарегистрированную апку — укажите её `appId`.
+
+Полный файл: [`src/scenarios/OpenApp.tsx`](./src/scenarios/OpenApp.tsx)
 
 ---
 

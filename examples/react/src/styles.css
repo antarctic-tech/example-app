@@ -9,6 +9,30 @@ body {
 .header { margin-bottom: 16px; }
 .header h1 { font-size: 18px; margin: 0 0 8px; }
 .header h1.home-title { font-size: 20px; margin: 0; }
+.start-param {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #71717a;
+}
+.start-param code {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #c7d2fe;
+  background: #1a1b26;
+  border: 1px solid #2a2b3d;
+  border-radius: 8px;
+  padding: 2px 8px;
+  word-break: break-all;
+}
+.start-param code.-empty {
+  color: #71717a;
+  font-weight: 500;
+}
 .back {
   display: inline-block;
   font-size: 12px;
@@ -56,3 +80,33 @@ code { font-size: 11px; }
 }
 .btn.-ghost { background: #2a2b3d; color: #e4e4e7; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.field span { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: #a1a1aa; }
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #2a2b3d;
+  background: #0f1117;
+  color: #e4e4e7;
+  font: inherit;
+  font-size: 13px;
+}
+.input::placeholder { color: #52525b; }
+.input:focus { outline: none; border-color: #6366f1; }
+form .btn { margin-top: 12px; }
+.call {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0f1117;
+  border: 1px solid #2a2b3d;
+  color: #c7d2fe;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.rules { margin-bottom: 0; }
+.status.-ok { color: #34d399; }
+.status.-error { color: #fca5a5; }

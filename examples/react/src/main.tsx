@@ -5,6 +5,7 @@ import { Home } from './Home';
 import { Auth } from './scenarios/Auth';
 import { Pay } from './scenarios/Pay';
 import { PayRefund } from './scenarios/PayRefund';
+import { OpenApp } from './scenarios/OpenApp';
 import './styles.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -15,6 +16,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/auth" element={<Auth />} />
         <Route path="/pay" element={<Pay />} />
         <Route path="/pay-refund" element={<PayRefund />} />
+        <Route path="/open-app" element={<OpenApp />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </HashRouter>

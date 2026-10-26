@@ -1,17 +1,96 @@
+<script lang="ts">
+/**
+ * Параметр этого открытия iframe. Вне setup, иначе каждый заход на экран
+ * начинал бы хендшейк заново. refreshSession() его не меняет.
+ */
+let cachedStartParam: string | null | undefined;
+</script>
+
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { AWScope } from "@antarctic-wallet/aw-sdk";
+import { onMounted, onUnmounted, ref, shallowRef } from "vue";
+import { AWScope, AWSDK } from "@antarctic-wallet/aw-sdk";
 
 interface AppConfig {
   id: string;
   name: string;
 }
 
-const appName = ref("Загрузка...");
+function getParentOrigin(): string {
+  const fromQuery = new URLSearchParams(window.location.search).get("parentOrigin");
+  if (fromQuery) return fromQuery;
+  if (window.parent !== window && document.referrer) {
+    try {
+      return new URL(document.referrer).origin;
+    } catch {
+      //
+    }
+  }
+  return "https://localhost:3310";
+}
 
-onMounted(async () => {
-  const config: AppConfig = await fetch("./config.json").then((r) => r.json());
-  appName.value = config.name;
+const appName = ref("Загрузка...");
+const startParam = ref<string | null>(null);
+const startParamReady = ref(false);
+const sdk = shallowRef<AWSDK | null>(null);
+
+let alive = true;
+
+async function readStartParam(appId: string) {
+  if (cachedStartParam !== undefined) {
+    startParam.value = cachedStartParam;
+    return;
+  }
+  if (!AWSDK.isInsideWallet()) {
+    cachedStartParam = null;
+    return;
+  }
+
+  const instance = new AWSDK({
+    appId,
+    scopes: [],
+    parentOrigin: getParentOrigin(),
+    persistSession: false,
+  });
+  if (!alive) {
+    instance.destroy();
+    return;
+  }
+  sdk.value = instance;
+
+  instance.events.on("sdk.ready", () => {
+    if (!alive) return;
+    startParam.value = instance.startParam;
+  });
+  instance.events.on("sdk.error", () => {
+    if (!alive) return;
+    startParam.value = null;
+  });
+
+  await instance.init();
+  if (!alive) return;
+  cachedStartParam = instance.startParam;
+  startParam.value = cachedStartParam;
+}
+
+onMounted(() => {
+  void (async () => {
+    try {
+      const config: AppConfig = await fetch("./config.json").then((r) => r.json());
+      if (!alive) return;
+      appName.value = config.name;
+      await readStartParam(config.id);
+    } catch {
+      if (alive) startParam.value = null;
+    } finally {
+      if (alive) startParamReady.value = true;
+    }
+  })();
+});
+
+onUnmounted(() => {
+  alive = false;
+  sdk.value?.destroy();
+  sdk.value = null;
 });
 
 const scenarios = [
@@ -22,6 +101,7 @@ const scenarios = [
     scopes: [AWScope.USER_DATA, AWScope.PAY],
     route: "/pay-refund",
   },
+  { title: "Открыть апку", scopes: [AWScope.USER_DATA], route: "/open-app" },
 ];
 </script>
 
@@ -29,6 +109,10 @@ const scenarios = [
   <div class="app">
     <header class="header">
       <h1>{{ appName }}</h1>
+      <p class="start-param">
+        start_param:
+        <code :class="{ '-empty': !startParam }">{{ startParamReady ? (startParam ?? "—") : "…" }}</code>
+      </p>
     </header>
 
     <article v-for="item in scenarios" :key="item.route" class="card">
@@ -62,6 +146,30 @@ body {
 .header h1 {
   font-size: 20px;
   margin: 0;
+}
+.start-param {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #71717a;
+}
+.start-param code {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: #c7d2fe;
+  background: #1a1b26;
+  border: 1px solid #2a2b3d;
+  border-radius: 8px;
+  padding: 2px 8px;
+  word-break: break-all;
+}
+.start-param code.-empty {
+  color: #71717a;
+  font-weight: 500;
 }
 .card {
   background: #1a1b26;

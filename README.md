@@ -317,6 +317,37 @@ handlers. Use `onClick` or `events.on("backButton")`, not both.
 
 ---
 
+## Start parameter
+
+`sdk.startParam` is the `start_param` the host passed when it opened this
+mini-app. Read it after `init()`. It belongs to this opening: it is not one of
+the launch query fields (`awPlatform`, `awColorScheme`, `awLanguageCode`) and
+it is not part of the session.
+
+The example home screen (`#/`, the list of scenarios) prints it under the app
+name, so you can see what the host sent. `…` means the handshake is still
+running. A string is the value. `—` means there is nothing to show: the page
+is open outside the wallet, the host did not pass a parameter, or the string
+was rejected. That screen asks for no scopes and does not save a session.
+
+```ts
+await sdk.init();
+
+if (sdk.startParam) {
+  openOrder(sdk.startParam);
+}
+```
+
+At most 512 characters, alphabet `A-Za-z0-9_-`. No parameter, a missing field,
+`null` and `""` are all `null`. A string outside the alphabet or the length
+limit also becomes `null`: `init()` still resolves, and `sdk.error` is not
+emitted. The SDK does not read `start_param` or `tgWebAppStartParam` from the
+page URL. The host sends an already checked string as `start_param` on
+`SDK_INIT_OK`, and on `SESSION_STATUS` when a saved session is restored.
+`refreshSession()` does not change the getter. `destroy()` clears it.
+
+---
+
 ## Mini-app config
 
 `public/config.json` (the field names are the same in every stack):
@@ -350,7 +381,7 @@ the fields are read by the wallet catalogue.
 \*In the `examples/vue` / `examples/react` / `examples/angular` starters the
 scopes are a constant inside each scenario file. Keep `requiredScopes` anyway —
 the catalogue reads it. The examples' manifest lists `["userData", "pay"]`,
-which is the union of all three scenarios; your real set may be narrower.
+which is the union of the sign-in and payment scenarios; your real set may be narrower.
 
 ---
 

@@ -23,7 +23,7 @@ MUST:
 - Secrets: `AW_API_BASE`, `AW_APP_ID`, `AW_API_SECRET` only in backend `.env`. Webhooks (still in development) are HMAC-signed with the same `app_secret`.
 - `appId` → mini-app `public/config.json` field `id` and backend `AW_APP_ID` (same value).
 - Subscribe to SDK events **before** `init()`. Call `sdk.destroy()` on unmount.
-- Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`, `AWScanQrError`).
+- Catch SDK errors with `instanceof` (`AWInitError`, `AWSessionError`, `AWScopeError`, `AWOperationError`, `AWTimeoutError`, `AWScanQrError`, `AWOpenAppError`).
 - Vue: store the SDK instance in `shallowRef`. React: `useRef`. Angular: a class field. Never put the SDK class into reactive/deep state. `@antarctic-wallet/aw-sdk/vue` exports `useAWSdk` (`init` on mount, `destroy` on unmount). Example scenarios do not use it: the login button retries `init()`. Copy the scenario.
 - Nested screens: `onClick` **or** `events.on('backButton')` (not both — both fire) → `init()` (starts the postMessage listener; presses are dropped until it runs) → `backButton.show()`. `show()` / `hide()` before `init()` are queued and sent once the channel is open (after the handshake, or after a restored session). A retried handshake resends the arrow if it should stay visible. `hide()` before `destroy()`. Android hardware back follows the same contract while the arrow is visible.
 
@@ -38,7 +38,11 @@ MUST NOT:
 
 AW surface you may use (closed set):
 
-- SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
+<<<<<<< HEAD
+
+- # SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `openApp`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
+- SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `startParam`, `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
+  > > > > > > > master
 - JWKS: `GET ${AW_API_BASE}/api/v2/sdk/jwks`
 - B2B: Bearer `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
 - B2B poll: `GET ${AW_API_BASE}/api/apps/v1/intents/:operationId_or_referenceId`
@@ -51,24 +55,25 @@ Partner domain (orders, catalog, your session cookies) lives on YOUR backend, no
 
 Single-app starters (hash router, login button, isolated scenarios):
 
-| Stack | Project | Port |
-|-------|---------|------|
-| Vue | `examples/vue` | 5184 |
-| React | `examples/react` | 5185 |
+| Stack   | Project            | Port |
+| ------- | ------------------ | ---- |
+| Vue     | `examples/vue`     | 5184 |
+| React   | `examples/react`   | 5185 |
 | Angular | `examples/angular` | 5186 |
 
 Copy **one** scenario file into your app — not Home or the router shell.
 
-| Goal | Vue | React | Angular | Scopes |
-|------|-----|-------|---------|--------|
-| Sign-in only | `vue/src/scenarios/Auth.vue` | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData` |
-| Sign-in + pay/donate | `…/Pay.vue` | `…/Pay.tsx` | `…/pay.component.ts` | `userData`, `pay` |
-| Pay + refund | `…/PayRefund.vue` | `…/PayRefund.tsx` | `…/pay-refund.component.ts` | `userData`, `pay` |
-| Backend (always) | `examples/backend-node/server.mjs` or `examples/backend-php/server.php` | same | same | — |
+| Goal                 | Vue                                                                     | React                          | Angular                                       | Scopes            |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------ | --------------------------------------------- | ----------------- |
+| Sign-in only         | `vue/src/scenarios/Auth.vue`                                            | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData`        |
+| Sign-in + pay/donate | `…/Pay.vue`                                                             | `…/Pay.tsx`                    | `…/pay.component.ts`                          | `userData`, `pay` |
+| Pay + refund         | `…/PayRefund.vue`                                                       | `…/PayRefund.tsx`              | `…/pay-refund.component.ts`                   | `userData`, `pay` |
+| Open another app     | `…/OpenApp.vue`                                                         | `…/OpenApp.tsx`                | `…/open-app.component.ts`                     | `userData`        |
+| Backend (always)     | `examples/backend-node/server.mjs` or `examples/backend-php/server.php` | same                           | same                                          | —                 |
 
 `appId` → that project's `public/config.json` field `id` and backend `AW_APP_ID`.
 Scopes are **constants inside each scenario file**, not from `config.requiredScopes`.
-Each scenario: own `AWSDK` (Vue: `shallowRef`; React: `useRef`; Angular: class field); subscribe before `init()`; `init()` on scenario mount (needed for `backButton` presses; login button retries); `destroy()` on unmount. Scenario screens show the host back button and go to `/` on click; Home leaves it hidden (host shows Close).
+Each scenario: own `AWSDK` (Vue: `shallowRef`; React: `useRef`; Angular: class field); subscribe before `init()`; `init()` on scenario mount (needed for `backButton` presses; login button retries); `destroy()` on unmount. Scenario screens show the host back button and go to `/` on click; Home leaves it hidden (host shows Close) and shows `sdk.startParam` under the app name.
 Router: hash (`#/auth`) so `?parentOrigin=` is preserved.
 Dev proxies `/api` → `http://127.0.0.1:3351`.
 Local mini-app App URL in AW settings: `https://127.0.0.1:<front-port>` (not `localhost`; hostname must contain `.`). `AW_API_BASE` is the API origin without a trailing `/api`.
@@ -102,7 +107,12 @@ confirms operations      postMessage to parentOrigin  JWKS verify + POST intents
 `POST /api/intents`
 
 ```json
-{ "idToken": "<sdk.idToken>", "type": "pay|receive|scopes", "amount": "5.00", "scopes": ["pay"] }
+{
+  "idToken": "<sdk.idToken>",
+  "type": "pay|receive|scopes",
+  "amount": "5.00",
+  "scopes": ["pay"]
+}
 ```
 
 - `amount` required for `pay` / `receive`
@@ -168,19 +178,19 @@ Constructor: `{ appId, scopes, parentOrigin, persistSession?: boolean, debug?: b
 
 Events (subscribe before `init`):
 
-| Event | Action |
-|-------|--------|
-| `sdk.ready` | UI from `session.userContext`; send `sdk.idToken` (null-check) to `/api/auth/session` |
-| `sdk.error` | Unsolicited host error, or `init()` failed; stop. An `ERROR` that answers a request rejects that call and does not emit `sdk.error` |
-| `session.expired` | Clear UI; `sdk.init()` again |
-| `session.refreshed` | Replace stored `idToken` |
-| `scopes.granted` | On ready (the granted set) and after a `scopes` operation |
-| `operation.rejected` | User declined in wallet; also thrown as `AWOperationError` with `errorCode: 'user_rejected'` |
-| `backButton` | Host back arrow pressed; you navigate, the container stays open |
-| `themeChanged` | `sdk.colorScheme` changed (`light` / `dark`; system theme already resolved). No payload |
-| `languageChanged` | `sdk.languageCode` changed (BCP 47). No payload |
-| `safeAreaChanged` | `sdk.safeAreaInset` changed (`{ top, right, bottom, left }`). No payload |
-| `activated` / `deactivated` | App went on / off screen (`sdk.isActive`). No payload |
+| Event                       | Action                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk.ready`                 | UI from `session.userContext`; send `sdk.idToken` (null-check) to `/api/auth/session`                                               |
+| `sdk.error`                 | Unsolicited host error, or `init()` failed; stop. An `ERROR` that answers a request rejects that call and does not emit `sdk.error` |
+| `session.expired`           | Clear UI; `sdk.init()` again                                                                                                        |
+| `session.refreshed`         | Replace stored `idToken`                                                                                                            |
+| `scopes.granted`            | On ready (the granted set) and after a `scopes` operation                                                                           |
+| `operation.rejected`        | User declined in wallet; also thrown as `AWOperationError` with `errorCode: 'user_rejected'`                                        |
+| `backButton`                | Host back arrow pressed; you navigate, the container stays open                                                                     |
+| `themeChanged`              | `sdk.colorScheme` changed (`light` / `dark`; system theme already resolved). No payload                                             |
+| `languageChanged`           | `sdk.languageCode` changed (BCP 47). No payload                                                                                     |
+| `safeAreaChanged`           | `sdk.safeAreaInset` changed (`{ top, right, bottom, left }`). No payload                                                            |
+| `activated` / `deactivated` | App went on / off screen (`sdk.isActive`). No payload                                                                               |
 
 `idToken` may be null while session is pending — do not POST it.
 
@@ -191,7 +201,7 @@ Pressing it only delivers `backButton` / `onClick` handlers — the host never n
 closes the container. `sdk.destroy()` hides the arrow and drops handlers.
 
 ```ts
-sdk.backButton.onClick(() => router.push('/'));
+sdk.backButton.onClick(() => router.push("/"));
 const pending = sdk.init(); // listener starts here; show() before this is queued, not dropped
 sdk.backButton.show();
 await pending;
@@ -199,6 +209,22 @@ await pending;
 
 `backButton.offClick(handler)` removes one handler. `backButton.isVisible` is the last requested state.
 Use `onClick` **or** `events.on('backButton')`, not both. Home / root: leave the button hidden (host shows Close). `hide()` before `destroy()`. `destroy()` also rejects in-flight requests (an open `scanQr` fails), drops `--aw-*` CSS variables, and clears `backgroundColor`.
+
+### Opening another mini-app
+
+`sdk.openApp({ appId })` asks the wallet to open a registered mini-app. The promise resolves when the wallet accepts the call. No scope is required for the call. The example still requests `userData` so the handshake matches the other screens. The example passes only `appId`.
+
+The SDK rejects its own `appId` (`same_app`) locally; that call is not sent.
+
+Host refusals arrive as `AWOpenAppError`: `not_found`, `blocked`, `suspended`, `stack_limit`, `rate_limited`. An older wallet without `open_app` throws `unsupported`. Check `sdk.isCommandAvailable(AWCommand.OpenApp)` after `init()`. A missing reply is `AWTimeoutError`.
+
+The example screen is `#/open-app`. It needs an SDK build that exports `openApp`.
+
+### Start parameter
+
+`sdk.startParam` is the `start_param` of this opening. Read it after `init()`. It is not a launch-query field and not part of the session. Alphabet `A-Za-z0-9_-`, at most 512 characters. Missing, `null`, `""`, or an invalid string is `null` (invalid also `console.warn`); `init()` still resolves and `sdk.error` is not emitted. The SDK does not read `start_param` or `tgWebAppStartParam` from the page URL. The host sends it on `SDK_INIT_OK`, and on `SESSION_STATUS` when a session is restored. `refreshSession()` does not change it. `destroy()` clears it.
+
+The example home screen shows it under the app name (`…` while the handshake runs, the string when present, `—` when empty). That screen calls `init()` with `scopes: []` and `persistSession: false`, leaves the host Close button, and does not call `init()` when `AWSDK.isInsideWallet()` is false.
 
 ### Host environment, scanner, haptics, background (0.4.2)
 
