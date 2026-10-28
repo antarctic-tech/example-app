@@ -5,6 +5,7 @@ import { Home } from './Home';
 import { Auth } from './scenarios/Auth';
 import { Pay } from './scenarios/Pay';
 import { PayRefund } from './scenarios/PayRefund';
+import { Scopes } from './scenarios/Scopes';
 import { OpenApp } from './scenarios/OpenApp';
 import './styles.css';
 
@@ -16,6 +17,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/auth" element={<Auth />} />
         <Route path="/pay" element={<Pay />} />
         <Route path="/pay-refund" element={<PayRefund />} />
+        <Route path="/scopes" element={<Scopes />} />
         <Route path="/open-app" element={<OpenApp />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

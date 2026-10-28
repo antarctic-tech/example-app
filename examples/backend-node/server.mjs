@@ -43,6 +43,7 @@ const STATIC_DIR =
 const AW_ISSUER = "aw";
 const AW_INTENTS_PATH = "/api/apps/v1/intents";
 const VALID_TYPES = new Set(["pay", "receive", "scopes"]);
+const VALID_SCOPES = new Set(["userData", "balance", "pay"]);
 /** Вебхук с дрейфом часов > 5 мин отклоняем. */
 const WEBHOOK_MAX_SKEW_SEC = 300;
 
@@ -175,9 +176,11 @@ function buildIntentPayload({ type, userAppLogin, amount, scopes, referenceId })
   const payload = { type, user_app_login: userAppLogin };
   if (referenceId) payload.reference_id = referenceId;
   if (type === "scopes") {
-    const list = Array.isArray(scopes)
-      ? scopes.filter((s) => typeof s === "string" && s.length > 0)
-      : [];
+    const raw = Array.isArray(scopes) ? scopes : [];
+    if (raw.some((s) => typeof s !== "string" || !VALID_SCOPES.has(s))) {
+      throw httpError(422, "INVALID_SCOPE");
+    }
+    const list = [...new Set(raw)];
     if (list.length === 0) throw httpError(422, "SCOPES_REQUIRED");
     payload.data = { scopes: list };
     return payload;

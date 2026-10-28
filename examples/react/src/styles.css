@@ -80,6 +80,22 @@ code { font-size: 11px; }
 }
 .btn.-ghost { background: #2a2b3d; color: #e4e4e7; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.balance { white-space: pre-wrap; font-size: 13px; }
+.scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.scope.-active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #10b981;
+}
+.scope-name { font-size: 13px; font-weight: 600; }
+.scope-note { display: block; font-size: 11px; color: #10b981; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 .field span { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: #a1a1aa; }
 .input {

@@ -37,7 +37,7 @@ function getParentOrigin(): string {
       @for (item of scenarios; track item.route) {
         <article class="card">
           <h2>{{ item.title }}</h2>
-          <p class="scopes">Скоупы: <code>{{ item.scopes.join(', ') }}</code></p>
+          <p class="scopes">Скоупы: <code>{{ item.scopes.join(', ') }}</code>@if (item.note) {, {{ item.note }}}</p>
           <a class="btn" [routerLink]="item.route">Открыть</a>
         </article>
       }
@@ -48,10 +48,16 @@ export class HomeComponent implements OnInit, OnDestroy {
   appName = 'Загрузка...';
   startParam: string | null = null;
   startParamReady = false;
-  scenarios = [
+  scenarios: { title: string; scopes: string[]; route: string; note?: string }[] = [
     { title: 'Вход', scopes: [AWScope.USER_DATA], route: '/auth' },
     { title: 'Донат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay' },
     { title: 'Покупка и возврат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay-refund' },
+    {
+      title: 'Скоупы',
+      scopes: [AWScope.USER_DATA, AWScope.BALANCE, AWScope.PAY],
+      note: 'выбор перед входом',
+      route: '/scopes',
+    },
     { title: 'Открыть апку', scopes: [AWScope.USER_DATA], route: '/open-app' },
   ];
 

@@ -6,6 +6,12 @@ const scenarios = [
   { title: 'Вход', scopes: [AWScope.USER_DATA], route: '/auth' },
   { title: 'Донат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay' },
   { title: 'Покупка и возврат', scopes: [AWScope.USER_DATA, AWScope.PAY], route: '/pay-refund' },
+  {
+    title: 'Скоупы',
+    scopes: [AWScope.USER_DATA, AWScope.BALANCE, AWScope.PAY],
+    note: 'выбор перед входом',
+    route: '/scopes',
+  },
   { title: 'Открыть апку', scopes: [AWScope.USER_DATA], route: '/open-app' },
 ];
 
@@ -107,6 +113,7 @@ export function Home() {
           <h2>{item.title}</h2>
           <p className="scopes">
             Скоупы: <code>{item.scopes.join(', ')}</code>
+            {'note' in item && item.note ? `, ${item.note}` : ''}
           </p>
           <Link className="btn" to={item.route}>
             Открыть

@@ -380,8 +380,8 @@ the fields are read by the wallet catalogue.
 
 \*In the `examples/vue` / `examples/react` / `examples/angular` starters the
 scopes are a constant inside each scenario file. Keep `requiredScopes` anyway —
-the catalogue reads it. The examples' manifest lists `["userData", "pay"]`,
-which is the union of the sign-in and payment scenarios; your real set may be narrower.
+the catalogue reads it. The examples' manifest lists `["userData", "balance", "pay"]`,
+which is the union of all five scenarios; your real set may be narrower.
 
 ---
 

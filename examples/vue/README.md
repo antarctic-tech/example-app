@@ -4,8 +4,8 @@
 
 Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 
-Один проект, четыре сценария. Вставьте свой `appId`, запустите — и увидите, как работает
-вход, платёж, возврат и открытие другой апки внутри кошелька.
+Один проект, пять сценариев. Вставьте свой `appId`, запустите — и увидите, как работает
+вход, платёж, возврат, довыдача скоупов и открытие другой апки внутри кошелька.
 
 ## Сценарии
 
@@ -15,7 +15,8 @@ Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 | **Вход**              | Авторизация пользователя, получение доверенного `userId` | [`src/scenarios/Auth.vue`](./src/scenarios/Auth.vue)           | `userData`        |
 | **Донат**             | Вход + односторонний платёж (без возврата)               | [`src/scenarios/Pay.vue`](./src/scenarios/Pay.vue)             | `userData`, `pay` |
 | **Покупка и возврат** | Вход + покупка + возврат                                 | [`src/scenarios/PayRefund.vue`](./src/scenarios/PayRefund.vue) | `userData`, `pay` |
-| **Открыть апку**      | `sdk.openApp`: другая апка по `appId`                    | [`src/scenarios/OpenApp.vue`](./src/scenarios/OpenApp.vue)     | `userData`        |
+| **Скоупы**            | Вход + довыдача скоупов, баланс, оплата и возврат        | [`src/scenarios/Scopes.vue`](./src/scenarios/Scopes.vue)       | выбор перед входом |
+| **Открыть апку**      | `sdk.openApp`: другая апка по `appId`                    | [`src/scenarios/OpenApp.vue`](./src/scenarios/OpenApp.vue)     | `userData`         |
 
 
 Стартовая страница (`#/`) — каталог примеров. Под названием мини-апки она показывает
@@ -80,7 +81,7 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
   "description": "Полное описание на странице приложения в кошельке.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay"]
+  "requiredScopes": ["userData", "balance", "pay"]
 }
 ```
 
@@ -502,9 +503,21 @@ async function refund(amount: string) {
 
 ---
 
+## 5. Скоупы
 
+Чекбоксы `userData`, `balance` и `pay` по умолчанию сняты. «Войти» создаёт SDK с отмеченным набором.
+«Обновить» шлёт `POST /api/intents` с `type: "scopes"` и только новыми скоупами.
+Уже выданный скоуп снять нельзя: удалить скоупы можно только удалением всего приложения. После подтверждения фронт читает `sdk.scopes.getScopes()`.
+Если выдан `balance`, баланс берётся из `sdk.scopes.getData()`.
 
-## 5. Открыть другую апку
+Оплата `0.10` доступна после скоупа `pay` и подтверждается листом. Возврат той же суммы —
+`type: "receive"`, без скоупа и без листа, только после оплаты.
+
+Полный файл: [`src/scenarios/Scopes.vue`](./src/scenarios/Scopes.vue)
+
+---
+
+## 6. Открыть другую апку
 
 Экран `#/open-app`. После входа вызывает `sdk.openApp`. Скоуп `userData` нужен
 только для хендшейка: сам метод скоупов не просит и на бэкенд не ходит.

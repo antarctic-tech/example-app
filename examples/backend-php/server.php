@@ -63,6 +63,7 @@ if ($STATIC_DIR === '') {
 const AW_ISSUER = 'aw';
 const AW_INTENTS_PATH = '/api/apps/v1/intents';
 const VALID_TYPES = ['pay', 'receive', 'scopes'];
+const VALID_SCOPES = ['userData', 'balance', 'pay'];
 /** Вебхук с дрейфом часов > 5 мин отклоняем. */
 const WEBHOOK_MAX_SKEW_SEC = 300;
 
@@ -380,7 +381,10 @@ function buildIntentPayload(array $args): array
         $list = [];
         if (is_array($scopes)) {
             foreach ($scopes as $s) {
-                if (is_string($s) && $s !== '') {
+                if (!is_string($s) || !in_array($s, VALID_SCOPES, true)) {
+                    httpError(422, 'INVALID_SCOPE');
+                }
+                if (!in_array($s, $list, true)) {
                     $list[] = $s;
                 }
             }

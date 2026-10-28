@@ -38,11 +38,7 @@ MUST NOT:
 
 AW surface you may use (closed set):
 
-<<<<<<< HEAD
-
-- # SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `openApp`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
-- SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `startParam`, `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
-  > > > > > > > master
+- SDK in iframe: `init` / `destroy`, session (`idToken`, `user`, `getSession`, `status`, `refreshSession`), `startParam`, `scopes.getScopes` / `getData`, `operations.requestConfirmation`, `openApp`, `backButton`, host environment, `scanQr`, `hapticFeedback`, `setBackgroundColor`, `isCommandAvailable`
 - JWKS: `GET ${AW_API_BASE}/api/v2/sdk/jwks`
 - B2B: Bearer `POST ${AW_API_BASE}/api/apps/v1/intents` with `type: 'pay' | 'receive' | 'scopes'`
 - B2B poll: `GET ${AW_API_BASE}/api/apps/v1/intents/:operationId_or_referenceId`
@@ -63,13 +59,14 @@ Single-app starters (hash router, login button, isolated scenarios):
 
 Copy **one** scenario file into your app — not Home or the router shell.
 
-| Goal                 | Vue                                                                     | React                          | Angular                                       | Scopes            |
-| -------------------- | ----------------------------------------------------------------------- | ------------------------------ | --------------------------------------------- | ----------------- |
-| Sign-in only         | `vue/src/scenarios/Auth.vue`                                            | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData`        |
-| Sign-in + pay/donate | `…/Pay.vue`                                                             | `…/Pay.tsx`                    | `…/pay.component.ts`                          | `userData`, `pay` |
-| Pay + refund         | `…/PayRefund.vue`                                                       | `…/PayRefund.tsx`              | `…/pay-refund.component.ts`                   | `userData`, `pay` |
-| Open another app     | `…/OpenApp.vue`                                                         | `…/OpenApp.tsx`                | `…/open-app.component.ts`                     | `userData`        |
-| Backend (always)     | `examples/backend-node/server.mjs` or `examples/backend-php/server.php` | same                           | same                                          | —                 |
+| Goal                 | Vue                                                                     | React                          | Angular                                       | Scopes                                                |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------ | --------------------------------------------- | ----------------------------------------------------- |
+| Sign-in only         | `vue/src/scenarios/Auth.vue`                                            | `react/src/scenarios/Auth.tsx` | `angular/src/app/scenarios/auth.component.ts` | `userData`                                            |
+| Sign-in + pay/donate | `…/Pay.vue`                                                             | `…/Pay.tsx`                    | `…/pay.component.ts`                          | `userData`, `pay`                                     |
+| Pay + refund         | `…/PayRefund.vue`                                                       | `…/PayRefund.tsx`              | `…/pay-refund.component.ts`                   | `userData`, `pay`                                     |
+| Dynamic scopes       | `…/Scopes.vue`                                                          | `…/Scopes.tsx`                 | `…/scopes.component.ts`                       | checked set at login; later extras via `scopes`       |
+| Open another app     | `…/OpenApp.vue`                                                         | `…/OpenApp.tsx`                | `…/open-app.component.ts`                     | `userData`                                            |
+| Backend (always)     | `examples/backend-node/server.mjs` or `examples/backend-php/server.php` | same                           | same                                          | —                                                     |
 
 `appId` → that project's `public/config.json` field `id` and backend `AW_APP_ID`.
 Scopes are **constants inside each scenario file**, not from `config.requiredScopes`.
@@ -254,8 +251,10 @@ Scope sets:
 - auth: `["userData"]`
 - pay: `["userData", "pay"]`
 - refund: `["userData", "pay"]` — for the purchase; the `receive` intent itself requires no scope
+- scopes: checkboxes start empty. «Войти» handshakes with the checked set. Later extras go through a `scopes` intent. A granted scope cannot be revoked from the mini-app; the user removes scopes only by deleting the whole app.
+- open-app: `["userData"]` — handshake only; `sdk.openApp` itself needs no scope
 
-`balance` is grantable too, but no example scenario needs it. Ask only what the scenario needs.
+Ask only what the scenario needs.
 
 ## Implementation checklist
 

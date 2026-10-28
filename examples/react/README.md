@@ -4,8 +4,8 @@
 
 React + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antarctic-wallet/aw-sdk).
 
-Один проект, четыре сценария. Вставьте свой `appId`, запустите — и увидите, как работает
-вход, платёж, возврат и открытие другой апки внутри кошелька.
+Один проект, пять сценариев. Вставьте свой `appId`, запустите — и увидите, как работает
+вход, платёж, возврат, довыдача скоупов и открытие другой апки внутри кошелька.
 
 ## Сценарии
 
@@ -14,6 +14,7 @@ React + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 | **Вход**              | Авторизация пользователя, получение доверенного `userId` | [`src/scenarios/Auth.tsx`](./src/scenarios/Auth.tsx)           | `userData`                   |
 | **Донат**             | Вход + односторонний платёж (без возврата)               | [`src/scenarios/Pay.tsx`](./src/scenarios/Pay.tsx)             | `userData`, `pay`            |
 | **Покупка и возврат** | Вход + покупка + возврат                                 | [`src/scenarios/PayRefund.tsx`](./src/scenarios/PayRefund.tsx) | `userData`, `pay`            |
+| **Скоупы**            | Вход + довыдача скоупов, баланс, оплата и возврат        | [`src/scenarios/Scopes.tsx`](./src/scenarios/Scopes.tsx)       | выбор перед входом           |
 | **Открыть апку**      | `sdk.openApp`: другая апка по `appId`                    | [`src/scenarios/OpenApp.tsx`](./src/scenarios/OpenApp.tsx)     | `userData`                   |
 
 Стартовая страница (`#/`) — каталог примеров. Под названием мини-апки она показывает
@@ -76,7 +77,7 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
   "description": "Полное описание на странице приложения в кошельке.",
   "icon": "./icon.svg",
   "category": "utilities",
-  "requiredScopes": ["userData", "pay"]
+  "requiredScopes": ["userData", "balance", "pay"]
 }
 ```
 
@@ -435,7 +436,21 @@ async function refund(amount: string) {
 
 ---
 
-## 5. Открыть другую апку
+## 5. Скоупы
+
+Чекбоксы `userData`, `balance` и `pay` по умолчанию сняты. «Войти» создаёт SDK с отмеченным набором.
+«Обновить» шлёт `POST /api/intents` с `type: "scopes"` и только новыми скоупами.
+Уже выданный скоуп снять нельзя: удалить скоупы можно только удалением всего приложения. После подтверждения фронт читает `sdk.scopes.getScopes()`.
+Если выдан `balance`, баланс берётся из `sdk.scopes.getData()`.
+
+Оплата `0.10` доступна после скоупа `pay` и подтверждается листом. Возврат той же суммы —
+`type: "receive"`, без скоупа и без листа, только после оплаты.
+
+Полный файл: [`src/scenarios/Scopes.tsx`](./src/scenarios/Scopes.tsx)
+
+---
+
+## 6. Открыть другую апку
 
 Экран `#/open-app`. После входа вызывает `sdk.openApp`. Скоуп `userData` нужен
 только для хендшейка: сам метод скоупов не просит и на бэкенд не ходит.
