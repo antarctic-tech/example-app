@@ -454,9 +454,7 @@ async function refund(amount: string) {
 
 Экран `#/open-app`. После входа вызывает `sdk.openApp`. Скоуп `userData` нужен
 только для хендшейка: сам метод скоупов не просит и на бэкенд не ходит.
-
-Нужна сборка `@antarctic-wallet/aw-sdk` из ветки `aw-2108`. В npm `0.4.2` метода
-ещё нет.
+Метод есть в aw-sdk с версии `0.4.3`.
 
 ```ts
 import { AWOpenAppError } from "@antarctic-wallet/aw-sdk";

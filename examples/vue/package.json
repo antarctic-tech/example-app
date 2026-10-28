@@ -1,6 +1,6 @@
 {
   "name": "example-embed-app-vue-scenarios",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "preview": "vite preview --port 5184"
   },
   "dependencies": {
-    "@antarctic-wallet/aw-sdk": "^0.4.2",
+    "@antarctic-wallet/aw-sdk": "^0.4.4",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"
   },

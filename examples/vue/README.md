@@ -9,7 +9,6 @@ Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 
 ## Сценарии
 
-
 | Сценарий              | Что делает                                               | Файл                                                           | Скоупы            |
 | --------------------- | -------------------------------------------------------- | -------------------------------------------------------------- | ----------------- |
 | **Вход**              | Авторизация пользователя, получение доверенного `userId` | [`src/scenarios/Auth.vue`](./src/scenarios/Auth.vue)           | `userData`        |
@@ -18,14 +17,11 @@ Vue 3 + Vite + [`@antarctic-wallet/aw-sdk`](https://www.npmjs.com/package/@antar
 | **Скоупы**            | Вход + довыдача скоупов, баланс, оплата и возврат        | [`src/scenarios/Scopes.vue`](./src/scenarios/Scopes.vue)       | выбор перед входом |
 | **Открыть апку**      | `sdk.openApp`: другая апка по `appId`                    | [`src/scenarios/OpenApp.vue`](./src/scenarios/OpenApp.vue)     | `userData`         |
 
-
 Стартовая страница (`#/`) — каталог примеров. Под названием мини-апки она показывает
 [`start_param`](#стартовый-параметр) этого открытия. **В свой продукт копируйте один файл
-из `src/scenarios/`**, а не всё приложение.
+из** `src/scenarios/`, а не всё приложение.
 
 ---
-
-
 
 ## Быстрый старт
 
@@ -85,7 +81,6 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
 }
 ```
 
-
 | Поле               | Зачем                                                                                  |
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `id`               | `appId` из кабинета. `new AWSDK({ appId })`                                            |
@@ -96,19 +91,14 @@ Vite слушает `127.0.0.1` с самоподписанным TLS и про�
 | `category`         | Слаг категории: `utilities`, `defi`, `games`                                           |
 | `requiredScopes`   | Манифест для каталога. В этом примере скоупы `init` заданы константой в файле сценария |
 
-
-
 | Что положить | Куда                                                       |
 | ------------ | ---------------------------------------------------------- |
 | `appId`      | `public/config.json` → `id` и `AW_APP_ID` в `.env` бэкенда |
 | Секрет API   | `.env` бэкенда (никогда в браузер)                         |
 
-
 Vite проксирует `/api` → бэкенд. Секреты живут **только** на сервере.
 
 ---
-
-
 
 ## Как это работает
 
@@ -126,8 +116,6 @@ iframe + нативный UI      ваш фронт + SDK             секре
 4. Для платежа: фронт просит **ваш** сервер создать интент → сервер создаёт интент в AW → фронт показывает лист подтверждения в кошельке.
 
 ---
-
-
 
 ## 1. Подключение SDK
 
@@ -201,8 +189,6 @@ onUnmounted(() => {
 });
 ```
 
-
-
 ### `parentOrigin`
 
 Кошелёк передаёт `?parentOrigin=...` в URL. SDK использует его для `postMessage`:
@@ -225,10 +211,7 @@ function getParentOrigin(): string {
 }
 ```
 
-
-
 ### События SDK
-
 
 | Событие              | Когда срабатывает                                |
 | -------------------- | ------------------------------------------------ |
@@ -238,9 +221,6 @@ function getParentOrigin(): string {
 | `session.refreshed`  | Токен обновился — свежий `idToken` в payload     |
 | `operation.rejected` | Пользователь отклонил операцию в кошельке        |
 | `backButton`         | Нажата стрелка «Назад» в шапке кошелька          |
-
-
-
 
 ### Кнопка «Назад»
 
@@ -268,7 +248,6 @@ URL страницы. `refreshSession()` значение не меняет, `de
 
 Ловите через `instanceof`:
 
-
 | Класс              | Когда                                             |
 | ------------------ | ------------------------------------------------- |
 | `AWInitError`      | Не удался `init()` (хендшейк, конфиг, таймаут)    |
@@ -278,12 +257,9 @@ URL страницы. `refreshSession()` значение не меняет, `de
 | `AWTimeoutError`   | Ответ не пришёл вовремя                           |
 | `AWOpenAppError`   | Другая апка не открылась или аргументы невалидны  |
 
-
 Полный файл: [`src/scenarios/Auth.vue`](./src/scenarios/Auth.vue)
 
 ---
-
-
 
 ## 2. Вход (авторизация)
 
@@ -314,8 +290,6 @@ async function verifyIdentity(idToken: string) {
 }
 ```
 
-
-
 ### Бэкенд
 
 ```js
@@ -342,8 +316,6 @@ app.post("/api/auth/session", express.json(), async (req, res) => {
 Полный файл: [`src/scenarios/Auth.vue`](./src/scenarios/Auth.vue)
 
 ---
-
-
 
 ## 3. Платёж (донат)
 
@@ -375,8 +347,6 @@ async function pay(amount: string) {
   // result.status: 'confirmed' | 'rejected' | ...
 }
 ```
-
-
 
 ### Бэкенд
 
@@ -430,8 +400,6 @@ app.post("/api/intents", express.json(), async (req, res) => {
 Полный файл: [`src/scenarios/Pay.vue`](./src/scenarios/Pay.vue)
 
 ---
-
-
 
 ## 4. Покупка и возврат
 
@@ -489,8 +457,6 @@ async function refund(amount: string) {
 }
 ```
 
-
-
 ### Бэкенд
 
 Тот же `POST /api/intents` из раздела 3. Сервер принимает `type: 'pay'` или
@@ -521,9 +487,7 @@ async function refund(amount: string) {
 
 Экран `#/open-app`. После входа вызывает `sdk.openApp`. Скоуп `userData` нужен
 только для хендшейка: сам метод скоупов не просит и на бэкенд не ходит.
-
-Нужна сборка `@antarctic-wallet/aw-sdk` из ветки `aw-2108`. В npm `0.4.2` метода
-ещё нет.
+Метод есть в aw-sdk с версии `0.4.3`.
 
 ```ts
 import { AWOpenAppError } from "@antarctic-wallet/aw-sdk";
